@@ -49,13 +49,21 @@ class LMClient:
     def generate_response(
         self, system_prompt: str, user_message: str, temperature: float = 0.75,
         max_tokens: int = 300, timeout: Optional[int] = 600,
-        top_p: float = 0.9, top_k: int = 20, presence_penalty: float = 0.0, repetition_penalty: float = 1.0, min_p: float = 0.0
+        top_p: float = 0.9, top_k: int = 20, presence_penalty: float = 0.0, repetition_penalty: float = 1.0, min_p: float = 0.0,
+        no_think: bool = False
     ):
         if not self.is_server_running():
             return None, None
 
+        # Qwen3系などの思考モデルで思考を抑制する
+        # chat_template_kwargs でllama.cpp/LM Studioに指示し、
+        # システムプロンプト先頭の /no_think でモデルにも直接指示する
+        effective_system = system_prompt
+        if no_think:
+            effective_system = "/no_think\n" + system_prompt
+
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": effective_system},
             {"role": "user", "content": user_message},
         ]
 
@@ -73,6 +81,8 @@ class LMClient:
             "repetition_penalty": repetition_penalty,
             "stream": False,
         }
+        if no_think:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
 
         try:
             response = requests.post(f"{self.base_url}/v1/chat/completions", json=payload, timeout=timeout)
