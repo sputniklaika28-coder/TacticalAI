@@ -326,7 +326,7 @@ class VTTCharMakerTab(ttk.Frame):
             for k in ["init", "cloak", "skill", "mod"]:
                 self.vars_sub_stats[stat][k].trace_add("write", lambda *args, s=stat: self._calc_sub_stat(s))
 
-        self.vars_equip = {"cloak_name": tk.StringVar(value="標準狩衣"), "weapon_name": tk.StringVar(value="支給祭具")}
+        self.vars_equip = {"cloak_name": tk.StringVar(value="標準狩衣"), "weapon_name": tk.StringVar(value="支給祭具"), "weapon2_name": tk.StringVar(value="")}
         self.vars_combat_mods = {
             "melee": tk.IntVar(value=0), "ranged": tk.IntVar(value=0),
             "anti_body": tk.IntVar(value=0), "anti_skill": tk.IntVar(value=0),
@@ -487,11 +487,13 @@ class VTTCharMakerTab(ttk.Frame):
         ttk.Entry(f_combat, textvariable=self.vars_equip["cloak_name"], width=15).grid(row=0, column=1, sticky="w")
         ttk.Label(f_combat, text="攻性祭具(武器):").grid(row=0, column=2, sticky="e")
         ttk.Entry(f_combat, textvariable=self.vars_equip["weapon_name"], width=15).grid(row=0, column=3, sticky="w")
-        ttk.Separator(f_combat, orient=tk.HORIZONTAL).grid(row=1, column=0, columnspan=4, sticky="ew", pady=5)
-        ttk.Label(f_combat, text="近接判定:").grid(row=2, column=0, sticky="e")
-        ttk.Entry(f_combat, textvariable=self.vars_combat_mods["melee"], width=5).grid(row=2, column=1, sticky="w")
-        ttk.Label(f_combat, text="遠隔判定:").grid(row=2, column=2, sticky="e")
-        ttk.Entry(f_combat, textvariable=self.vars_combat_mods["ranged"], width=5).grid(row=2, column=3, sticky="w")
+        ttk.Label(f_combat, text="攻性祭具2(副武器):").grid(row=1, column=0, sticky="e")
+        ttk.Entry(f_combat, textvariable=self.vars_equip["weapon2_name"], width=15).grid(row=1, column=1, sticky="w")
+        ttk.Separator(f_combat, orient=tk.HORIZONTAL).grid(row=2, column=0, columnspan=4, sticky="ew", pady=5)
+        ttk.Label(f_combat, text="近接判定:").grid(row=3, column=0, sticky="e")
+        ttk.Entry(f_combat, textvariable=self.vars_combat_mods["melee"], width=5).grid(row=3, column=1, sticky="w")
+        ttk.Label(f_combat, text="遠隔判定:").grid(row=3, column=2, sticky="e")
+        ttk.Entry(f_combat, textvariable=self.vars_combat_mods["ranged"], width=5).grid(row=3, column=3, sticky="w")
 
     def _build_page2(self, parent):
         canvas = tk.Canvas(parent, highlightthickness=0)
@@ -766,7 +768,7 @@ class VTTCharMakerTab(ttk.Frame):
                     "  \"rank\": \"(階級)\", \"department\": \"(所属)\",\n"
                     "  \"body\": 3, \"soul\": 3, \"skill\": 3, \"magic\": 3,\n"
                     "  \"hp\": 10, \"sp\": 10, \"armor\": 0, \"mobility\": 4,\n"
-                    "  \"weapon\": \"(武器名)\", \"cloak\": \"(防具名)\",\n"
+                    "  \"weapon\": \"(第1武器名)\", \"weapon2\": \"(第2武器名、なければ空欄)\", \"cloak\": \"(防具名)\",\n"
                     "  \"skills\": [{\"name\": \"(スキル名)\", \"cost\": \"1\", \"condition\": \"無\", \"effect\": \"効果\"}],\n"
                     "  \"inventory\": [{\"name\": \"形代\", \"type\": \"支給\", \"count\": 7}],\n"
                     "  \"accessories\": [{\"name\": \"(備品)\", \"memo\": \"(メモ)\"}],\n"
@@ -852,6 +854,7 @@ class VTTCharMakerTab(ttk.Frame):
 
             if hasattr(self, 'vars_equip'):
                 if "weapon_name" in self.vars_equip: self.vars_equip["weapon_name"].set(data.get("weapon", ""))
+                if "weapon2_name" in self.vars_equip: self.vars_equip["weapon2_name"].set(data.get("weapon2", ""))
                 if "cloak_name" in self.vars_equip: self.vars_equip["cloak_name"].set(data.get("cloak", ""))
 
             if hasattr(self, 'vars_skills'):
@@ -1603,7 +1606,8 @@ class GeneratorTab(ttk.Frame):
                 "  \"department\": \"(境界対策課などデータに存在する所属)\",\n"
                 "  \"body\": 3, \"soul\": 3, \"skill\": 3, \"magic\": 3,\n"
                 "  \"hp\": 10, \"sp\": 10, \"armor\": 0, \"mobility\": 4,\n"
-                "  \"weapon\": \"(データ内の武器名)\",\n"
+                "  \"weapon\": \"(データ内の第1武器名)\",\n"
+                "  \"weapon2\": \"(データ内の第2武器名、なければ空欄)\",\n"
                 "  \"cloak\": \"(データ内の狩衣・防具名)\",\n"
                 "  \"skills\": [{\"name\": \"(データ内のスキル/術名)\", \"cost\": \"(コスト)\", \"condition\": \"(条件)\", \"effect\": \"(効果)\"}],\n"
                 "  \"text_history\": \"(世界観に沿った過去の経歴やエピソード)\",\n"
