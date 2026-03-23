@@ -277,7 +277,7 @@ class VTTCharMakerApp(tk.Tk):
             user_req = self.text_input.get("1.0", tk.END).strip()
             sys_prompt = "あなたはデータジェネレーターです。必ず指定されたJSON形式のみを出力し、余計な会話はしないでください。"
             user_msg = self._build_char_prompt(user_req)
-            result = self.lm_client.generate_response(system_prompt=sys_prompt, user_message=user_msg, temperature=0.7, max_tokens=1500, timeout=None, is_rp=False)
+            result = self.lm_client.generate_response(system_prompt=sys_prompt, user_message=user_msg, temperature=0.7, max_tokens=1500, timeout=None)
             self.after(0, self._on_finish, result)
 
         threading.Thread(target=run, daemon=True).start()

@@ -745,8 +745,8 @@ class VTTCharMakerTab(ttk.Frame):
             try:
                 print("DEBUG: Step 1 開始...")
                 step1_result, _ = self.lm_client.generate_response(
-                    system_prompt=sys_prompt_step1, user_message=f"要望: {user_req}", 
-                    temperature=0.7, max_tokens=4096, timeout=None
+                    system_prompt=sys_prompt_step1, user_message=f"要望: {user_req}",
+                    temperature=0.7, max_tokens=8192, timeout=None
                 )
                 print("DEBUG: Step 1 完了\n")
                 
@@ -784,9 +784,10 @@ class VTTCharMakerTab(ttk.Frame):
                 
                 print("DEBUG: Step 2 開始...")
                 step2_result, _ = self.lm_client.generate_response(
-                    system_prompt=sys_prompt_step2, 
-                    user_message=f"【キャラクター設定】\n{step1_result}", 
-                    temperature=0.1, max_tokens=4096, timeout=None
+                    system_prompt=sys_prompt_step2,
+                    user_message=f"【キャラクター設定】\n{step1_result}",
+                    temperature=0.1, max_tokens=4096, timeout=None,
+                    no_think=True
                 )
                 print("DEBUG: Step 2 完了\n")
                 
