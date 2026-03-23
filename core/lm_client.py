@@ -90,9 +90,15 @@ class LMClient:
                 result = response.json()
                 message = result["choices"][0]["message"]
                 
-                # 思考（reasoning_content）が別フィールドで返ってきた場合は捨てる
+                # 思考モデル対策: contentが空でreasoning_contentに内容がある場合、
+                # reasoning_contentからJSON等の有用なデータを救出する
                 raw_content = message.get("content") or ""
-                
+                reasoning = message.get("reasoning_content") or ""
+
+                if not raw_content.strip() and reasoning:
+                    # contentが空 → reasoning_contentからJSON抽出を試みる
+                    raw_content = reasoning
+
                 # ログを見ると、AIがJSONの中にさらに思考を書き込んでいる場合があるため、クリーン処理にかける
                 content = self._clean_response(raw_content)
                 tool_calls = message.get("tool_calls")
