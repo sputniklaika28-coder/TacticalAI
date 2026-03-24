@@ -1,8 +1,9 @@
-import requests
+import copy
 import json
 import re
-import copy
-from typing import Optional
+
+import requests
+
 
 class LMClient:
     def __init__(self, base_url: str = "http://localhost:1234", model: str = "local-model"):
@@ -13,38 +14,66 @@ class LMClient:
         try:
             response = requests.get(f"{self.base_url}/v1/models", timeout=3)
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
     def _clean_response(self, text: str) -> str:
         """AIの余計な独り言や思考プロセスを完全に削ぎ落とし、純粋なJSONだけを抽出する"""
-        
+
         # 1. もし <think> タグが含まれていたら、その後ろだけを切り出す
         if "</think>" in text:
             text = text.split("</think>")[-1]
-            
+
         # 2. 「思考プロセス：」などの日本語の独り言が含まれていた場合、
         #    最初の `{` が出現するまでの文字をすべてゴミとして切り捨てる
-        first_brace_idx = text.find('{')
+        first_brace_idx = text.find("{")
         if first_brace_idx != -1:
             # 最初の { から後ろを切り出す
             text = text[first_brace_idx:]
-            
+
         # 3. 最後の `}` より後ろにあるゴミ（「出力完了しました」など）を切り捨てる
-        last_brace_idx = text.rfind('}')
+        last_brace_idx = text.rfind("}")
         if last_brace_idx != -1:
             # 最初の { から最後の } までを正確に抜き出す
-            text = text[:last_brace_idx + 1]
-            
+            text = text[: last_brace_idx + 1]
+
         # 4. マークダウン（```json 〜 ```）が残っていたら綺麗に剥がす
-        import re
         cb = chr(96) * 3
-        pattern = cb + r'(?:json)?\s*(\{.*?\})\s*' + cb
+        pattern = cb + r"(?:json)?\s*(\{.*?\})\s*" + cb
         match = re.search(pattern, text, flags=re.DOTALL | re.IGNORECASE)
         if match:
             text = match.group(1)
-            
+
         return text.strip()
+
+    def _find_json_in_text(self, text: str) -> str:
+        """テキスト内から最大の有効な JSON オブジェクトを探して返す。
+        見つからなければ空文字を返す。"""
+        # すべての { の位置を探索し、対応する } までが有効な JSON かを試す
+        best = ""
+        i = 0
+        while i < len(text):
+            start = text.find("{", i)
+            if start == -1:
+                break
+            # 末尾から逆順で } を探し、最大の有効 JSON を優先
+            depth = 0
+            for j in range(start, len(text)):
+                if text[j] == "{":
+                    depth += 1
+                elif text[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[start : j + 1]
+                        try:
+                            json.loads(candidate)
+                            if len(candidate) > len(best):
+                                best = candidate
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                        break
+            i = start + 1
+        return best
 
     def _extract_content(self, result: dict) -> tuple[str, bool]:
         """API レスポンスから content を抽出する。
@@ -56,28 +85,38 @@ class LMClient:
         message = result["choices"][0]["message"]
         raw_content = message.get("content") or ""
         finish_reason = result["choices"][0].get("finish_reason", "")
-        has_reasoning = bool((message.get("reasoning_content") or "").strip())
+        reasoning = (message.get("reasoning_content") or "").strip()
+        has_reasoning = bool(reasoning)
+
+        print(
+            f"DEBUG: content長={len(raw_content.strip())}, "
+            f"reasoning長={len(reasoning)}, "
+            f"finish_reason={finish_reason}"
+        )
 
         if not raw_content.strip() and finish_reason != "length" and has_reasoning:
-            # reasoning_content を候補として取り出し、
-            # _clean_response 後に有効な JSON である場合のみ採用する。
-            # thinking テキスト内の { を誤抽出しないようにするためのガード。
-            rc = message.get("reasoning_content") or ""
-            candidate = self._clean_response(rc)
-            try:
-                json.loads(candidate)
-                raw_content = rc  # 有効な JSON → フォールバック採用
-            except (json.JSONDecodeError, ValueError):
-                pass  # 思考テキストのゴミ → raw_content を空のまま維持
+            # reasoning_content 内から有効な JSON を探す（思考テキスト混在対応）
+            found_json = self._find_json_in_text(reasoning)
+            if found_json:
+                print(f"DEBUG: reasoning_content内からJSON抽出成功 (長さ={len(found_json)})")
+                raw_content = found_json
 
         thinking_ignored = not raw_content.strip() and has_reasoning
         return raw_content, thinking_ignored
 
     def generate_response(
-        self, system_prompt: str, user_message: str, temperature: float = 0.75,
-        max_tokens: int = 300, timeout: Optional[int] = 600,
-        top_p: float = 0.9, top_k: int = 20, presence_penalty: float = 0.0, repetition_penalty: float = 1.0, min_p: float = 0.0,
-        no_think: bool = False
+        self,
+        system_prompt: str,
+        user_message: str,
+        temperature: float = 0.75,
+        max_tokens: int = 300,
+        timeout: int | None = 600,
+        top_p: float = 0.9,
+        top_k: int = 20,
+        presence_penalty: float = 0.0,
+        repetition_penalty: float = 1.0,
+        min_p: float = 0.0,
+        no_think: bool = False,
     ):
         if not self.is_server_running():
             return None, None
@@ -112,7 +151,9 @@ class LMClient:
             payload["chat_template_kwargs"] = {"enable_thinking": False}
 
         try:
-            response = requests.post(f"{self.base_url}/v1/chat/completions", json=payload, timeout=timeout)
+            response = requests.post(
+                f"{self.base_url}/v1/chat/completions", json=payload, timeout=timeout
+            )
             if response.status_code == 200:
                 result = response.json()
                 raw_content, thinking_ignored = self._extract_content(result)
@@ -120,14 +161,34 @@ class LMClient:
                 # no_think が無視されて content が空の場合、max_tokens を倍にしてリトライ
                 # （モデルが思考トークンで max_tokens を消費しきった場合の救済）
                 if thinking_ignored and no_think:
+                    print("DEBUG: thinking_ignored検出 → max_tokens×2でリトライ")
                     retry_payload = {**payload, "max_tokens": max_tokens * 2}
                     retry_resp = requests.post(
                         f"{self.base_url}/v1/chat/completions",
-                        json=retry_payload, timeout=timeout,
+                        json=retry_payload,
+                        timeout=timeout,
                     )
                     if retry_resp.status_code == 200:
                         retry_result = retry_resp.json()
-                        raw_content, _ = self._extract_content(retry_result)
+                        raw_content, still_ignored = self._extract_content(retry_result)
+
+                        # それでもダメなら、enable_thinking を外してリトライ
+                        # （思考を許可し、reasoning_content 内の JSON を抽出する）
+                        if still_ignored:
+                            print("DEBUG: リトライも空 → enable_thinking解除で最終リトライ")
+                            final_payload = {
+                                k: v
+                                for k, v in retry_payload.items()
+                                if k != "chat_template_kwargs"
+                            }
+                            final_resp = requests.post(
+                                f"{self.base_url}/v1/chat/completions",
+                                json=final_payload,
+                                timeout=timeout,
+                            )
+                            if final_resp.status_code == 200:
+                                final_result = final_resp.json()
+                                raw_content, _ = self._extract_content(final_result)
 
                 # ログを見ると、AIがJSONの中にさらに思考を書き込んでいる場合があるため、クリーン処理にかける
                 content = self._clean_response(raw_content)

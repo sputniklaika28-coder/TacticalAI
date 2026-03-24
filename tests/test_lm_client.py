@@ -8,17 +8,15 @@ test_lm_client.py — LMClient のユニットテスト
 
 外部依存 requests はすべてモック化する。
 """
-import json
+
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from core.lm_client import LMClient
-
 
 # ──────────────────────────────────────────
 # is_server_running
 # ──────────────────────────────────────────
+
 
 class TestIsServerRunning:
     def test_returns_true_when_200(self):
@@ -46,14 +44,13 @@ class TestIsServerRunning:
         mock_resp.status_code = 200
         with patch("core.lm_client.requests.get", return_value=mock_resp) as mock_get:
             client.is_server_running()
-            mock_get.assert_called_once_with(
-                "http://localhost:9999/v1/models", timeout=3
-            )
+            mock_get.assert_called_once_with("http://localhost:9999/v1/models", timeout=3)
 
 
 # ──────────────────────────────────────────
 # _clean_response
 # ──────────────────────────────────────────
+
 
 class TestCleanResponse:
     def setup_method(self):
@@ -64,12 +61,12 @@ class TestCleanResponse:
         assert self.client._clean_response(text) == '{"action": "move"}'
 
     def test_strips_think_tag(self):
-        text = "<think>考え中…</think>\n{\"action\": \"wait\"}"
+        text = '<think>考え中…</think>\n{"action": "wait"}'
         result = self.client._clean_response(text)
         assert result == '{"action": "wait"}'
 
     def test_strips_leading_prose(self):
-        text = "思考プロセス：では移動します。\n{\"action\": \"move\"}"
+        text = '思考プロセス：では移動します。\n{"action": "move"}'
         result = self.client._clean_response(text)
         assert result == '{"action": "move"}'
 
@@ -79,7 +76,7 @@ class TestCleanResponse:
         assert result == '{"action": "move"}'
 
     def test_strips_markdown_code_block(self):
-        text = "```json\n{\"action\": \"attack\"}\n```"
+        text = '```json\n{"action": "attack"}\n```'
         result = self.client._clean_response(text)
         assert result == '{"action": "attack"}'
 
@@ -93,7 +90,7 @@ class TestCleanResponse:
         assert "hello world" in result or result == "hello world"
 
     def test_nested_think_tag(self):
-        text = "<think>step1</think><think>step2</think>{\"ok\": true}"
+        text = '<think>step1</think><think>step2</think>{"ok": true}'
         result = self.client._clean_response(text)
         assert result == '{"ok": true}'
 
@@ -102,14 +99,11 @@ class TestCleanResponse:
 # generate_response
 # ──────────────────────────────────────────
 
+
 class TestGenerateResponse:
     def _make_api_response(self, content: str):
         """OpenAI 互換レスポンスの dict を作る"""
-        return {
-            "choices": [
-                {"message": {"content": content, "tool_calls": None}}
-            ]
-        }
+        return {"choices": [{"message": {"content": content, "tool_calls": None}}]}
 
     def test_returns_none_when_server_down(self):
         client = LMClient()
@@ -125,8 +119,10 @@ class TestGenerateResponse:
         api_resp.status_code = 200
         api_resp.json.return_value = self._make_api_response(raw)
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp):
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp),
+        ):
             content, tools = client.generate_response("sys", "user")
 
         assert content == '{"action": "cast"}'
@@ -138,8 +134,10 @@ class TestGenerateResponse:
         api_resp.status_code = 200
         api_resp.json.return_value = self._make_api_response('{"ok": true}')
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp) as mock_post:
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp) as mock_post,
+        ):
             client.generate_response("sys", "user", no_think=True)
 
         payload = mock_post.call_args[1]["json"]
@@ -151,16 +149,20 @@ class TestGenerateResponse:
         api_resp = MagicMock()
         api_resp.status_code = 503
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp):
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp),
+        ):
             content, tools = client.generate_response("sys", "user")
 
         assert content is None
 
     def test_returns_none_on_exception(self):
         client = LMClient()
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", side_effect=TimeoutError):
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", side_effect=TimeoutError),
+        ):
             content, tools = client.generate_response("sys", "user")
 
         assert content is None
@@ -178,13 +180,15 @@ class TestGenerateResponse:
                         "content": "",
                         "reasoning_content": '思考中…\n{"action": "heal"}',
                         "tool_calls": None,
-                    }
+                    },
                 }
             ]
         }
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp):
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp),
+        ):
             content, tools = client.generate_response("sys", "user")
 
         assert content == '{"action": "heal"}'
@@ -202,13 +206,15 @@ class TestGenerateResponse:
                         "content": "",
                         "reasoning_content": 'Thinking: Step 1 analyze {"partial": thinking...} more text',
                         "tool_calls": None,
-                    }
+                    },
                 }
             ]
         }
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp):
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp),
+        ):
             # no_think=False なのでリトライは発生しない
             content, tools = client.generate_response("sys", "user", no_think=False)
 
@@ -227,13 +233,15 @@ class TestGenerateResponse:
                         "content": "",
                         "reasoning_content": 'Thinking: {"partial": true} ...',
                         "tool_calls": None,
-                    }
+                    },
                 }
             ]
         }
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp):
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp),
+        ):
             content, tools = client.generate_response("sys", "user")
 
         assert content == ""
@@ -253,7 +261,7 @@ class TestGenerateResponse:
                         "content": "",
                         "reasoning_content": "Thinking about the problem...",
                         "tool_calls": None,
-                    }
+                    },
                 }
             ]
         }
@@ -268,16 +276,18 @@ class TestGenerateResponse:
                         "content": '{"result": "success"}',
                         "reasoning_content": "Now I have enough tokens...",
                         "tool_calls": None,
-                    }
+                    },
                 }
             ]
         }
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", side_effect=[first_resp, retry_resp]) as mock_post:
-            content, tools = client.generate_response(
-                "sys", "user", max_tokens=4096, no_think=True
-            )
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch(
+                "core.lm_client.requests.post", side_effect=[first_resp, retry_resp]
+            ) as mock_post,
+        ):
+            content, tools = client.generate_response("sys", "user", max_tokens=4096, no_think=True)
 
         assert content == '{"result": "success"}'
         # 2回呼ばれたことを確認
@@ -299,13 +309,15 @@ class TestGenerateResponse:
                         "content": "",
                         "reasoning_content": "Thinking...",
                         "tool_calls": None,
-                    }
+                    },
                 }
             ]
         }
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp) as mock_post:
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp) as mock_post,
+        ):
             content, tools = client.generate_response("sys", "user", no_think=False)
 
         assert content == ""
@@ -327,8 +339,10 @@ class TestGenerateResponse:
             ]
         }
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp):
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp),
+        ):
             content, tools = client.generate_response("sys", "user")
 
         assert tools is None
@@ -339,11 +353,88 @@ class TestGenerateResponse:
         api_resp.status_code = 200
         api_resp.json.return_value = self._make_api_response('{"x": 1}')
 
-        with patch.object(client, "is_server_running", return_value=True), \
-             patch("core.lm_client.requests.post", return_value=api_resp) as mock_post:
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp) as mock_post,
+        ):
             client.generate_response("sys", "user")
 
         url = mock_post.call_args[0][0]
         assert "myserver:5678" in url
         payload = mock_post.call_args[1]["json"]
         assert payload["model"] == "my-model"
+
+    def test_extracts_json_from_reasoning_with_thinking_text(self):
+        """reasoning_content に思考テキストとJSONが混在する場合、JSONを抽出する"""
+        client = LMClient()
+        embedded_json = '{"name": "テスト太郎", "body": 4, "soul": 3}'
+        api_resp = MagicMock()
+        api_resp.status_code = 200
+        api_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": f"まずキャラを考えます…\n{embedded_json}\nこれで完成です。",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp),
+        ):
+            content, _ = client.generate_response("sys", "user", no_think=False)
+
+        assert '"name"' in content
+        assert "テスト太郎" in content
+
+    def test_final_retry_removes_enable_thinking(self):
+        """2回リトライしても空の場合、enable_thinking を外して最終リトライする"""
+        client = LMClient()
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "ただの思考テキスト",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        final_resp = MagicMock()
+        final_resp.status_code = 200
+        final_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": 'キャラを作ります。{"name": "最終太郎", "hp": 4}。以上。',
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch(
+                "core.lm_client.requests.post", side_effect=[empty_resp, empty_resp, final_resp]
+            ) as mock_post,
+        ):
+            content, _ = client.generate_response("sys", "user", no_think=True, max_tokens=4096)
+
+        assert mock_post.call_count == 3
+        # 最終リトライには chat_template_kwargs が含まれない
+        final_payload = mock_post.call_args_list[2][1]["json"]
+        assert "chat_template_kwargs" not in final_payload
+        assert "最終太郎" in content
