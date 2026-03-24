@@ -13,7 +13,7 @@ class CharacterManager:
     def load_characters(self):
         """JSONからキャラクターを読み込み"""
         if self.config_path.exists():
-            with open(self.config_path, encoding='utf-8') as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 data = json.load(f)
                 self.characters = data.get("characters", {})
 
@@ -23,10 +23,7 @@ class CharacterManager:
 
     def get_enabled_characters(self) -> list[dict]:
         """有効なキャラクター一覧を取得"""
-        return [
-            char for char in self.characters.values()
-            if char.get("enabled", False)
-        ]
+        return [char for char in self.characters.values() if char.get("enabled", False)]
 
     def get_character_count(self) -> int:
         """現在のキャラクター数"""

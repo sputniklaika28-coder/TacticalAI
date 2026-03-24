@@ -7,6 +7,7 @@ test_character_manager.py — CharacterManager のユニットテスト
   - get_enabled_characters()
   - get_character_count()
 """
+
 import json
 from pathlib import Path
 
@@ -52,11 +53,7 @@ class TestGetEnabledCharacters:
         assert "player_01" not in ids  # enabled: False
 
     def test_empty_when_none_enabled(self, tmp_path: Path):
-        data = {
-            "characters": {
-                "c1": {"id": "c1", "name": "x", "enabled": False, "is_ai": False}
-            }
-        }
+        data = {"characters": {"c1": {"id": "c1", "name": "x", "enabled": False, "is_ai": False}}}
         p = tmp_path / "chars.json"
         p.write_text(json.dumps(data), encoding="utf-8")
         cm = CharacterManager(config_path=str(p))

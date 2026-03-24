@@ -26,20 +26,20 @@ class LMClient:
 
         # 2. 「思考プロセス：」などの日本語の独り言が含まれていた場合、
         #    最初の `{` が出現するまでの文字をすべてゴミとして切り捨てる
-        first_brace_idx = text.find('{')
+        first_brace_idx = text.find("{")
         if first_brace_idx != -1:
             # 最初の { から後ろを切り出す
             text = text[first_brace_idx:]
 
         # 3. 最後の `}` より後ろにあるゴミ（「出力完了しました」など）を切り捨てる
-        last_brace_idx = text.rfind('}')
+        last_brace_idx = text.rfind("}")
         if last_brace_idx != -1:
             # 最初の { から最後の } までを正確に抜き出す
-            text = text[:last_brace_idx + 1]
+            text = text[: last_brace_idx + 1]
 
         # 4. マークダウン（```json 〜 ```）が残っていたら綺麗に剥がす
         cb = chr(96) * 3
-        pattern = cb + r'(?:json)?\s*(\{.*?\})\s*' + cb
+        pattern = cb + r"(?:json)?\s*(\{.*?\})\s*" + cb
         match = re.search(pattern, text, flags=re.DOTALL | re.IGNORECASE)
         if match:
             text = match.group(1)
@@ -53,18 +53,18 @@ class LMClient:
         best = ""
         i = 0
         while i < len(text):
-            start = text.find('{', i)
+            start = text.find("{", i)
             if start == -1:
                 break
             # 末尾から逆順で } を探し、最大の有効 JSON を優先
             depth = 0
             for j in range(start, len(text)):
-                if text[j] == '{':
+                if text[j] == "{":
                     depth += 1
-                elif text[j] == '}':
+                elif text[j] == "}":
                     depth -= 1
                     if depth == 0:
-                        candidate = text[start:j + 1]
+                        candidate = text[start : j + 1]
                         try:
                             json.loads(candidate)
                             if len(candidate) > len(best):
@@ -88,9 +88,11 @@ class LMClient:
         reasoning = (message.get("reasoning_content") or "").strip()
         has_reasoning = bool(reasoning)
 
-        print(f"DEBUG: content長={len(raw_content.strip())}, "
-              f"reasoning長={len(reasoning)}, "
-              f"finish_reason={finish_reason}")
+        print(
+            f"DEBUG: content長={len(raw_content.strip())}, "
+            f"reasoning長={len(reasoning)}, "
+            f"finish_reason={finish_reason}"
+        )
 
         if not raw_content.strip() and finish_reason != "length" and has_reasoning:
             # reasoning_content 内から有効な JSON を探す（思考テキスト混在対応）
@@ -103,10 +105,18 @@ class LMClient:
         return raw_content, thinking_ignored
 
     def generate_response(
-        self, system_prompt: str, user_message: str, temperature: float = 0.75,
-        max_tokens: int = 300, timeout: int | None = 600,
-        top_p: float = 0.9, top_k: int = 20, presence_penalty: float = 0.0, repetition_penalty: float = 1.0, min_p: float = 0.0,
-        no_think: bool = False
+        self,
+        system_prompt: str,
+        user_message: str,
+        temperature: float = 0.75,
+        max_tokens: int = 300,
+        timeout: int | None = 600,
+        top_p: float = 0.9,
+        top_k: int = 20,
+        presence_penalty: float = 0.0,
+        repetition_penalty: float = 1.0,
+        min_p: float = 0.0,
+        no_think: bool = False,
     ):
         if not self.is_server_running():
             return None, None
@@ -141,7 +151,9 @@ class LMClient:
             payload["chat_template_kwargs"] = {"enable_thinking": False}
 
         try:
-            response = requests.post(f"{self.base_url}/v1/chat/completions", json=payload, timeout=timeout)
+            response = requests.post(
+                f"{self.base_url}/v1/chat/completions", json=payload, timeout=timeout
+            )
             if response.status_code == 200:
                 result = response.json()
                 raw_content, thinking_ignored = self._extract_content(result)
@@ -153,7 +165,8 @@ class LMClient:
                     retry_payload = {**payload, "max_tokens": max_tokens * 2}
                     retry_resp = requests.post(
                         f"{self.base_url}/v1/chat/completions",
-                        json=retry_payload, timeout=timeout,
+                        json=retry_payload,
+                        timeout=timeout,
                     )
                     if retry_resp.status_code == 200:
                         retry_result = retry_resp.json()
@@ -164,12 +177,14 @@ class LMClient:
                         if still_ignored:
                             print("DEBUG: リトライも空 → enable_thinking解除で最終リトライ")
                             final_payload = {
-                                k: v for k, v in retry_payload.items()
+                                k: v
+                                for k, v in retry_payload.items()
                                 if k != "chat_template_kwargs"
                             }
                             final_resp = requests.post(
                                 f"{self.base_url}/v1/chat/completions",
-                                json=final_payload, timeout=timeout,
+                                json=final_payload,
+                                timeout=timeout,
                             )
                             if final_resp.status_code == 200:
                                 final_result = final_resp.json()

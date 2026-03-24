@@ -58,15 +58,11 @@ class SessionManager:
         if not self.log_file:
             return
 
-        msg_data = {
-            "timestamp": datetime.now().isoformat(),
-            "speaker": speaker,
-            "body": body
-        }
+        msg_data = {"timestamp": datetime.now().isoformat(), "speaker": speaker, "body": body}
         self.history.append(msg_data)
 
         # 追記モード('a')で1行だけ書き込む
-        with open(self.log_file, 'a', encoding='utf-8') as f:
+        with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(msg_data, ensure_ascii=False) + "\n")
 
     def load_session(self, session_folder_name: str) -> bool:
@@ -84,7 +80,7 @@ class SessionManager:
 
         try:
             # JSONLを1行ずつ読み込む
-            with open(self.log_file, encoding='utf-8') as f:
+            with open(self.log_file, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:

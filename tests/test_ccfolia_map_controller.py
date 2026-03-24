@@ -10,6 +10,7 @@ DOM 操作・pyautogui は呼ばれないのでテスト環境でも安全。
   - _parse_xy()
   - _hash()
 """
+
 from unittest.mock import patch
 
 import pytest
@@ -25,6 +26,7 @@ def controller(mock_driver) -> CCFoliaMapController:
 # ──────────────────────────────────────────
 # _parse_xy
 # ──────────────────────────────────────────
+
 
 class TestParseXY:
     def test_normal_translate(self, controller):
@@ -49,6 +51,7 @@ class TestParseXY:
 # _hash
 # ──────────────────────────────────────────
 
+
 class TestHash:
     def test_extracts_8_chars_from_shared(self, controller):
         url = "https://ccfolia.com/shared/abcdef1234567890/img.png"
@@ -68,6 +71,7 @@ class TestHash:
 # ──────────────────────────────────────────
 # get_board_state
 # ──────────────────────────────────────────
+
 
 class TestGetBoardState:
     def test_returns_list(self, controller):
@@ -102,6 +106,7 @@ class TestGetBoardState:
 # ──────────────────────────────────────────
 # move_piece
 # ──────────────────────────────────────────
+
 
 class TestMovePiece:
     def test_returns_false_when_piece_not_found(self, controller, capsys):

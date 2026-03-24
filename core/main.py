@@ -13,7 +13,7 @@ class PromptManager:
     def load_templates(self):
         """JSONからプロンプトテンプレートを読み込み"""
         if self.config_path.exists():
-            with open(self.config_path, encoding='utf-8') as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 data = json.load(f)
                 self.templates = data.get("templates", {})
         else:
@@ -30,8 +30,5 @@ class PromptManager:
 
     def save_templates(self):
         """テンプレートをJSONに保存"""
-        with open(self.config_path, 'w', encoding='utf-8') as f:
+        with open(self.config_path, "w", encoding="utf-8") as f:
             json.dump({"templates": self.templates}, f, ensure_ascii=False, indent=2)
-
-
-

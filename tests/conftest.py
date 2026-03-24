@@ -4,6 +4,7 @@ conftest.py — 共通フィクスチャ
 全テストで共有する pytest フィクスチャをここに集約する。
 外部依存（LM Studio API / Selenium）はすべてモック化する。
 """
+
 import json
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # ──────────────────────────────────────────
 # JSON ファイルフィクスチャ
 # ──────────────────────────────────────────
+
 
 @pytest.fixture
 def characters_json(tmp_path: Path) -> Path:
@@ -69,6 +71,7 @@ def prompts_json(tmp_path: Path) -> Path:
 # LMClient モック
 # ──────────────────────────────────────────
 
+
 @pytest.fixture
 def mock_lm_client():
     """LMClient を完全にモックした MagicMock を返す"""
@@ -81,6 +84,7 @@ def mock_lm_client():
 # ──────────────────────────────────────────
 # Selenium WebDriver モック
 # ──────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_driver():

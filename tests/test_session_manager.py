@@ -6,6 +6,7 @@ test_session_manager.py — SessionManager のユニットテスト
   - log_message()
   - load_session()
 """
+
 import json
 from pathlib import Path
 
