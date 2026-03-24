@@ -190,7 +190,7 @@ class TestGenerateResponse:
         assert content == '{"action": "heal"}'
 
     def test_no_fallback_when_reasoning_content_is_thinking_text(self):
-        """reasoning_content が思考テキストのみで有効な JSON でない場合、空文字を返す"""
+        """reasoning_content が思考テキストのみで有効な JSON でない場合、空文字を返す（no_think=False でリトライなし）"""
         client = LMClient()
         api_resp = MagicMock()
         api_resp.status_code = 200
@@ -209,7 +209,8 @@ class TestGenerateResponse:
 
         with patch.object(client, "is_server_running", return_value=True), \
              patch("core.lm_client.requests.post", return_value=api_resp):
-            content, tools = client.generate_response("sys", "user")
+            # no_think=False なのでリトライは発生しない
+            content, tools = client.generate_response("sys", "user", no_think=False)
 
         assert content == ""
 
@@ -236,6 +237,79 @@ class TestGenerateResponse:
             content, tools = client.generate_response("sys", "user")
 
         assert content == ""
+
+    def test_retries_with_doubled_max_tokens_when_no_think_ignored(self):
+        """no_think=True でモデルが思考を無視した場合、max_tokens を倍にしてリトライする"""
+        client = LMClient()
+
+        # 1回目: content 空 + reasoning_content に思考テキスト（JSON 検証不合格）
+        first_resp = MagicMock()
+        first_resp.status_code = 200
+        first_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "Thinking about the problem...",
+                        "tool_calls": None,
+                    }
+                }
+            ]
+        }
+        # 2回目: リトライ成功（倍の max_tokens で content が返る）
+        retry_resp = MagicMock()
+        retry_resp.status_code = 200
+        retry_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"result": "success"}',
+                        "reasoning_content": "Now I have enough tokens...",
+                        "tool_calls": None,
+                    }
+                }
+            ]
+        }
+
+        with patch.object(client, "is_server_running", return_value=True), \
+             patch("core.lm_client.requests.post", side_effect=[first_resp, retry_resp]) as mock_post:
+            content, tools = client.generate_response(
+                "sys", "user", max_tokens=4096, no_think=True
+            )
+
+        assert content == '{"result": "success"}'
+        # 2回呼ばれたことを確認
+        assert mock_post.call_count == 2
+        # 2回目の max_tokens が倍になっていることを確認
+        retry_payload = mock_post.call_args_list[1][1]["json"]
+        assert retry_payload["max_tokens"] == 8192
+
+    def test_no_retry_when_no_think_is_false(self):
+        """no_think=False の場合、思考が無視されてもリトライしない"""
+        client = LMClient()
+        api_resp = MagicMock()
+        api_resp.status_code = 200
+        api_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "Thinking...",
+                        "tool_calls": None,
+                    }
+                }
+            ]
+        }
+
+        with patch.object(client, "is_server_running", return_value=True), \
+             patch("core.lm_client.requests.post", return_value=api_resp) as mock_post:
+            content, tools = client.generate_response("sys", "user", no_think=False)
+
+        assert content == ""
+        assert mock_post.call_count == 1  # リトライなし
 
     def test_empty_tool_calls_list_normalized_to_none(self):
         """tool_calls が空リスト [] の場合、None に正規化する"""

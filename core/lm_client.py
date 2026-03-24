@@ -46,6 +46,33 @@ class LMClient:
             
         return text.strip()
 
+    def _extract_content(self, result: dict) -> tuple[str, bool]:
+        """API レスポンスから content を抽出する。
+
+        Returns:
+            (raw_content, thinking_ignored): raw_content はモデルの出力テキスト。
+            thinking_ignored は content が空で reasoning_content に思考が入っていた場合 True。
+        """
+        message = result["choices"][0]["message"]
+        raw_content = message.get("content") or ""
+        finish_reason = result["choices"][0].get("finish_reason", "")
+        has_reasoning = bool((message.get("reasoning_content") or "").strip())
+
+        if not raw_content.strip() and finish_reason != "length" and has_reasoning:
+            # reasoning_content を候補として取り出し、
+            # _clean_response 後に有効な JSON である場合のみ採用する。
+            # thinking テキスト内の { を誤抽出しないようにするためのガード。
+            rc = message.get("reasoning_content") or ""
+            candidate = self._clean_response(rc)
+            try:
+                json.loads(candidate)
+                raw_content = rc  # 有効な JSON → フォールバック採用
+            except (json.JSONDecodeError, ValueError):
+                pass  # 思考テキストのゴミ → raw_content を空のまま維持
+
+        thinking_ignored = not raw_content.strip() and has_reasoning
+        return raw_content, thinking_ignored
+
     def generate_response(
         self, system_prompt: str, user_message: str, temperature: float = 0.75,
         max_tokens: int = 300, timeout: Optional[int] = 600,
@@ -88,29 +115,23 @@ class LMClient:
             response = requests.post(f"{self.base_url}/v1/chat/completions", json=payload, timeout=timeout)
             if response.status_code == 200:
                 result = response.json()
-                message = result["choices"][0]["message"]
-                
-                # content を取得し、空の場合は reasoning_content にフォールバック
-                # （no_think を指定してもモデルが思考トークンに全出力を入れてしまう場合の対策）
-                raw_content = message.get("content") or ""
-                finish_reason = result["choices"][0].get("finish_reason", "")
+                raw_content, thinking_ignored = self._extract_content(result)
 
-                if not raw_content.strip() and finish_reason != "length":
-                    # reasoning_content を候補として取り出し、
-                    # _clean_response 後に有効な JSON である場合のみ採用する。
-                    # thinking テキスト内の { を誤抽出しないようにするためのガード。
-                    rc = message.get("reasoning_content") or ""
-                    if rc.strip():
-                        candidate = self._clean_response(rc)
-                        try:
-                            json.loads(candidate)
-                            raw_content = rc  # 有効な JSON → フォールバック採用
-                        except (json.JSONDecodeError, ValueError):
-                            pass  # 思考テキストのゴミ → raw_content を空のまま維持
+                # no_think が無視されて content が空の場合、max_tokens を倍にしてリトライ
+                # （モデルが思考トークンで max_tokens を消費しきった場合の救済）
+                if thinking_ignored and no_think:
+                    retry_payload = {**payload, "max_tokens": max_tokens * 2}
+                    retry_resp = requests.post(
+                        f"{self.base_url}/v1/chat/completions",
+                        json=retry_payload, timeout=timeout,
+                    )
+                    if retry_resp.status_code == 200:
+                        retry_result = retry_resp.json()
+                        raw_content, _ = self._extract_content(retry_result)
 
                 # ログを見ると、AIがJSONの中にさらに思考を書き込んでいる場合があるため、クリーン処理にかける
                 content = self._clean_response(raw_content)
-                tool_calls = message.get("tool_calls") or None
+                tool_calls = result["choices"][0]["message"].get("tool_calls") or None
 
                 return content, tool_calls
             return None, None
