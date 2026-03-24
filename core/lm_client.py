@@ -1,8 +1,9 @@
-import requests
+import copy
 import json
 import re
-import copy
-from typing import Optional
+
+import requests
+
 
 class LMClient:
     def __init__(self, base_url: str = "http://localhost:1234", model: str = "local-model"):
@@ -13,37 +14,36 @@ class LMClient:
         try:
             response = requests.get(f"{self.base_url}/v1/models", timeout=3)
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
     def _clean_response(self, text: str) -> str:
         """AIの余計な独り言や思考プロセスを完全に削ぎ落とし、純粋なJSONだけを抽出する"""
-        
+
         # 1. もし <think> タグが含まれていたら、その後ろだけを切り出す
         if "</think>" in text:
             text = text.split("</think>")[-1]
-            
+
         # 2. 「思考プロセス：」などの日本語の独り言が含まれていた場合、
         #    最初の `{` が出現するまでの文字をすべてゴミとして切り捨てる
         first_brace_idx = text.find('{')
         if first_brace_idx != -1:
             # 最初の { から後ろを切り出す
             text = text[first_brace_idx:]
-            
+
         # 3. 最後の `}` より後ろにあるゴミ（「出力完了しました」など）を切り捨てる
         last_brace_idx = text.rfind('}')
         if last_brace_idx != -1:
             # 最初の { から最後の } までを正確に抜き出す
             text = text[:last_brace_idx + 1]
-            
+
         # 4. マークダウン（```json 〜 ```）が残っていたら綺麗に剥がす
-        import re
         cb = chr(96) * 3
         pattern = cb + r'(?:json)?\s*(\{.*?\})\s*' + cb
         match = re.search(pattern, text, flags=re.DOTALL | re.IGNORECASE)
         if match:
             text = match.group(1)
-            
+
         return text.strip()
 
     def _find_json_in_text(self, text: str) -> str:
@@ -104,7 +104,7 @@ class LMClient:
 
     def generate_response(
         self, system_prompt: str, user_message: str, temperature: float = 0.75,
-        max_tokens: int = 300, timeout: Optional[int] = 600,
+        max_tokens: int = 300, timeout: int | None = 600,
         top_p: float = 0.9, top_k: int = 20, presence_penalty: float = 0.0, repetition_penalty: float = 1.0, min_p: float = 0.0,
         no_think: bool = False
     ):

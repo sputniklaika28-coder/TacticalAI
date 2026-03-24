@@ -7,7 +7,6 @@ test_session_manager.py — SessionManager のユニットテスト
   - load_session()
 """
 import json
-import time
 from pathlib import Path
 
 import pytest

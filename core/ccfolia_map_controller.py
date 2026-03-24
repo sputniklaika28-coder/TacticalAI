@@ -2,9 +2,12 @@
 ccfolia_map_controller.py — 最小版
 pyautogui ドラッグのみ。スケールは駒座標から実測。DPI補正あり。
 """
-import re, time, logging
-from selenium.webdriver.common.by import By
+import logging
+import re
+import time
+
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
 logger = logging.getLogger(__name__)

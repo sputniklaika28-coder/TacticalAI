@@ -8,13 +8,9 @@ test_lm_client.py — LMClient のユニットテスト
 
 外部依存 requests はすべてモック化する。
 """
-import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from core.lm_client import LMClient
-
 
 # ──────────────────────────────────────────
 # is_server_running

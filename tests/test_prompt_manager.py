@@ -10,8 +10,6 @@ test_prompt_manager.py — PromptManager のユニットテスト
 import json
 from pathlib import Path
 
-import pytest
-
 from core.main import PromptManager
 
 

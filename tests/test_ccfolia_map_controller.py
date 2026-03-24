@@ -10,10 +10,11 @@ DOM 操作・pyautogui は呼ばれないのでテスト環境でも安全。
   - _parse_xy()
   - _hash()
 """
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
+
 import pytest
 
-from core.ccfolia_map_controller import CCFoliaMapController, GRID_SIZE
+from core.ccfolia_map_controller import GRID_SIZE, CCFoliaMapController
 
 
 @pytest.fixture
@@ -120,7 +121,6 @@ class TestMovePiece:
         """move_piece に渡した grid 座標が _drag の pixel 座標に変換されること"""
         with patch.object(controller, "_drag", return_value=True) as mock_drag:
             controller.move_piece("abcdef12", 5, 7)
-        _, kwargs_or_args = mock_drag.call_args[0], mock_drag.call_args
         # _drag(pieces, target_piece, dest_px_x, dest_px_y) の引数を確認
         args = mock_drag.call_args[0]
         assert args[2] == 5 * GRID_SIZE  # dest_px_x

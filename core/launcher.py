@@ -3,19 +3,18 @@
 # タクティカル祓魔師TRPG AIシステム - 統合ランチャー
 # ================================
 
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import json
-import shutil
-import subprocess
-import threading
-import sys
 import os
 import re
-import requests
-import webbrowser
-from datetime import datetime
+import shutil
+import subprocess
+import sys
+import threading
+import tkinter as tk
 from pathlib import Path
+from tkinter import messagebox, scrolledtext, simpledialog, ttk
+
+import requests
 
 # --- パス設定 ---
 _THIS = Path(__file__).resolve()
@@ -45,11 +44,12 @@ def compress_tokens_safe(text):
     return compressed
 
 def parse_llm_json_robust(text: str) -> dict:
-    import json, re
+    import json
+    import re
     clean_text = re.sub(r'```json\n?|```\n?', '', text).strip()
     start = clean_text.find('{')
     end = clean_text.rfind('}')
-    
+
     parsed_data = {}
     if start != -1 and end != -1:
         try:
@@ -57,7 +57,7 @@ def parse_llm_json_robust(text: str) -> dict:
             print("DEBUG: JSONパース成功！")
             return parsed_data
         except json.JSONDecodeError:
-            pass 
+            pass
 
     print("DEBUG: JSONパース失敗。正規表現による強制抽出モードに移行します！")
     pattern_str = r'"([^"]+)"\s*:\s*(?:"([^"]*)"|(\d+))'
@@ -67,17 +67,17 @@ def parse_llm_json_robust(text: str) -> dict:
             parsed_data[key] = val_str.replace('\\n', '\n')
         elif val_num:
             parsed_data[key] = int(val_num)
-            
+
     for list_key in ["skills", "inventory", "accessories"]:
         if list_key not in parsed_data:
             parsed_data[list_key] = []
-            
+
     return parsed_data
 
 def load_json(path: Path) -> dict:
     if path.exists():
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, encoding='utf-8') as f:
                 content = f.read().strip()
                 return json.loads(content) if content else {}
         except json.JSONDecodeError:
@@ -203,7 +203,6 @@ class LauncherTab(ttk.Frame):
             messagebox.showwarning("入力エラー", "URL は http:// または https:// で始める必要があります", parent=self.winfo_toplevel())
             return
 
-        selected = self.var_session.get()
         default_char = self.var_default_char.get().strip() or "meta_gm"
         connector_path = CORE_DIR / "ccfolia_connector.py"
 
@@ -253,7 +252,7 @@ class LauncherTab(ttk.Frame):
             try:
                 self._proc.stdin.write(json.dumps({"type": "quit"}) + "\n")
                 self._proc.stdin.flush()
-            except: pass
+            except Exception: pass
             self._proc.terminate()
         self.btn_stop.config(state="disabled")
         self.status_var.set("停止中...")
@@ -275,8 +274,9 @@ class LauncherTab(ttk.Frame):
         if self._proc and self._proc.poll() is None:
             payload = json.dumps({"type": "chat", "character": character_name, "text": text}, ensure_ascii=False) + "\n"
             try:
-                self._proc.stdin.write(payload)
-                self._proc.stdin.flush()
+                if self._proc.stdin:
+                    self._proc.stdin.write(payload)
+                    self._proc.stdin.flush()
                 self._log(f"[システム] CCFoliaへ送信命令を出しました。({character_name})\n", "ok")
             except Exception as e:
                 self._log(f"[システムエラー] 送信失敗: {e}\n", "err")
@@ -293,7 +293,7 @@ class VTTCharMakerTab(ttk.Frame):
         sys.path.insert(0, str(CORE_DIR))
         from lm_client import LMClient
         self.lm_client = LMClient()
-        
+
         self.saved_files = []
         self._init_vars()
         self._build_ui()
@@ -319,8 +319,8 @@ class VTTCharMakerTab(ttk.Frame):
         self.vars_sub_stats = {}
         for stat in ["hp", "sp", "armor", "mobility"]:
             self.vars_sub_stats[stat] = {
-                "init": tk.IntVar(value=10 if stat in ["hp", "sp"] else 0), 
-                "cloak": tk.IntVar(value=0), "skill": tk.IntVar(value=0), 
+                "init": tk.IntVar(value=10 if stat in ["hp", "sp"] else 0),
+                "cloak": tk.IntVar(value=0), "skill": tk.IntVar(value=0),
                 "mod": tk.IntVar(value=0), "final": tk.IntVar(value=10 if stat in ["hp", "sp"] else 0)
             }
             for k in ["init", "cloak", "skill", "mod"]:
@@ -390,7 +390,7 @@ class VTTCharMakerTab(ttk.Frame):
         self.text_input = scrolledtext.ScrolledText(f_ai, height=4, font=("", 10))
         self.text_input.pack(fill=tk.X, pady=(0, 5))
         self.text_input.insert("1.0", "例：近接特化のベテラン。過去に重傷を負い、少し影がある。")
-        
+
         ttk.Checkbutton(f_ai, text="拡張データ(追加ルール等)を適用する", variable=self.var_use_extra_rules).pack(anchor="w", pady=(0, 5))
 
         self.btn_gen = ttk.Button(f_ai, text="✨ シート構成でAI生成", command=self._start_generate)
@@ -409,7 +409,7 @@ class VTTCharMakerTab(ttk.Frame):
 
         right_frame = ttk.Frame(paned)
         paned.add(right_frame, weight=3)
-        
+
         self.sheet_notebook = ttk.Notebook(right_frame)
         self.sheet_notebook.pack(fill=tk.BOTH, expand=True)
 
@@ -456,11 +456,11 @@ class VTTCharMakerTab(ttk.Frame):
 
         f_stat = ttk.LabelFrame(inner, text="能力値・副能力値", padding=8)
         f_stat.pack(fill=tk.X, pady=5, padx=5)
-        
+
         headers = ["初期値", "補正値", "特技", "成長", "最終値"]
         for i, h in enumerate(headers):
             ttk.Label(f_stat, text=h, font=("", 8, "bold")).grid(row=0, column=i+1, padx=4)
-            
+
         stats_map = [("【体】", "body"), ("【霊】", "soul"), ("【巧】", "skill"), ("【術】", "magic")]
         for r, (label, key) in enumerate(stats_map, 1):
             ttk.Label(f_stat, text=label).grid(row=r, column=0, sticky="e")
@@ -610,7 +610,7 @@ class VTTCharMakerTab(ttk.Frame):
 
         f_spc = ttk.LabelFrame(inner, text="特殊所見 (被呪・障骸)", padding=8)
         f_spc.pack(fill=tk.X, pady=5, padx=5)
-        
+
         ttk.Label(f_spc, text="被呪・残穢係数:").grid(row=0, column=0, sticky="e")
         ttk.Entry(f_spc, textvariable=self.vars_lore["curse_coeff"], width=20).grid(row=0, column=1, sticky="w")
         ttk.Label(f_spc, text="[所見]:").grid(row=0, column=2, sticky="e")
@@ -637,7 +637,7 @@ class VTTCharMakerTab(ttk.Frame):
         self.text_seminary_report = make_txt(inner, "神官学校・神学院における内申報告書", 3)
         self.text_investigation = make_txt(inner, "興信所による個人身辺調査", 3)
         self.text_family_comments = make_txt(inner, "家族・知人からのコメント", 3)
-        
+
         f_ov = ttk.LabelFrame(inner, text="総括所見", padding=5)
         f_ov.pack(fill=tk.X, pady=2, padx=5)
         self.text_overall_remarks = scrolledtext.ScrolledText(f_ov, height=3, font=("", 10))
@@ -674,7 +674,7 @@ class VTTCharMakerTab(ttk.Frame):
         name = self.vars_prof["name"].get().strip() or "NoName"
         file_name = simpledialog.askstring("保存", "保存するファイル名を入力してください", initialvalue=name, parent=self.winfo_toplevel())
         if not file_name: return
-        
+
         data = {
             "prof": {k: v.get() for k, v in self.vars_prof.items()},
             "main_stats": {stat: {k: v.get() for k, v in vals.items()} for stat, vals in self.vars_main_stats.items()},
@@ -697,7 +697,7 @@ class VTTCharMakerTab(ttk.Frame):
             "text_overall_remarks": self.text_overall_remarks.get("1.0", tk.END).strip(),
             "memo": self.text_memo.get("1.0", tk.END).strip()
         }
-        
+
         path = SAVED_PCS_DIR / f"{file_name}.json"
         save_json(path, data)
         self._refresh_saved_list()
@@ -723,20 +723,20 @@ class VTTCharMakerTab(ttk.Frame):
             import tkinter.messagebox as messagebox
             messagebox.showerror("エラー", "LM-Studioが起動していません。")
             return
-            
+
         self.btn_gen.config(state="disabled")
         self.update()
 
         def run():
             user_req = self.text_input.get("1.0", tk.END).strip()
             try:
-                with open("configs/world_setting_compressed.txt", "r", encoding="utf-8") as f:
+                with open("configs/world_setting_compressed.txt", encoding="utf-8") as f:
                     compressed_data = f.read()
             except FileNotFoundError:
                 compressed_data = "※エラー: configs/world_setting_compressed.txt が見つかりません。"
 
             self.after(0, lambda: self.status_var.set("生成中 (Step 1/2: ルールに従いキャラクターを構築中...)"))
-            
+
             sys_prompt_step1 = (
                 "あなたはTRPG『タクティカル祓魔師』の厳格かつ創造的なGMです。\n"
                 f"【世界観データ】\n{compressed_data}\n\n"
@@ -804,7 +804,7 @@ class VTTCharMakerTab(ttk.Frame):
                 "  □ 支給品の固定(KT7/PG7/SHN21)+選択1種 は正しいか？\n\n"
                 "ルールと計算式を厳守しながら、魅力的な設定テキストを構築してください。"
             )
-            
+
             try:
                 print("DEBUG: Step 1 開始...")
                 step1_result, _ = self.lm_client.generate_response(
@@ -812,9 +812,9 @@ class VTTCharMakerTab(ttk.Frame):
                     temperature=0.7, max_tokens=8192, timeout=None
                 )
                 print("DEBUG: Step 1 完了\n")
-                
+
                 self.after(0, lambda: self.status_var.set("生成中 (Step 2/2: AIがシステム用にデータを翻訳中...)"))
-                
+
                 sys_prompt_step2 = (
                     "あなたは極めて優秀なデータ入力・翻訳アシスタントです。\n"
                     "以下の【キャラクター設定】を読み取り、指定されたJSONフォーマットに抽出・翻訳してください。\n"
@@ -845,7 +845,7 @@ class VTTCharMakerTab(ttk.Frame):
                     "  \"text_family_comments\": \"(知人からのコメント)\", \"text_overall_remarks\": \"(GMからの所見)\"\n"
                     "}"
                 )
-                
+
                 print("DEBUG: Step 2 開始...")
                 step2_result, _ = self.lm_client.generate_response(
                     system_prompt=sys_prompt_step2,
@@ -854,9 +854,9 @@ class VTTCharMakerTab(ttk.Frame):
                     no_think=True
                 )
                 print("DEBUG: Step 2 完了\n")
-                
+
                 self.after(0, self._on_finish, step2_result)
-                
+
             except Exception as e:
                 self.after(0, lambda e=e: self.status_var.set(f"❌ 内部エラー: {e}"))
                 self.after(0, lambda: self.btn_gen.config(state="normal"))
@@ -868,7 +868,7 @@ class VTTCharMakerTab(ttk.Frame):
         self.btn_gen.config(state="normal")
         print("=== AIの出力結果 ===")
         print(result_content)
-        
+
         data = parse_llm_json_robust(result_content)
         if not data:
             self.status_var.set("❌ 生成失敗 (AIの出力からデータが抽出できませんでした)")
@@ -887,8 +887,8 @@ class VTTCharMakerTab(ttk.Frame):
                 if "affiliation" in self.vars_prof: self.vars_prof["affiliation"].set("環境庁 神祇部")
 
             if hasattr(self, 'vars_lore'):
-                lore_keys = ["height", "weight", "blood_type", "religion", "service_years", "apt_test", 
-                             "eval_body", "eval_soul", "eval_output", "eval_resist", "eval_tool", 
+                lore_keys = ["height", "weight", "blood_type", "religion", "service_years", "apt_test",
+                             "eval_body", "eval_soul", "eval_output", "eval_resist", "eval_tool",
                              "innate_type", "curse_coeff", "impairment"]
                 for k in lore_keys:
                     if k in self.vars_lore:
@@ -925,7 +925,7 @@ class VTTCharMakerTab(ttk.Frame):
                     for k in ["melee", "ranged", "anti_body", "anti_skill", "anti_soul", "anti_magic"]:
                         try:
                             self.vars_combat_mods[k].set(int(mods.get(k, 0)))
-                        except (ValueError, TypeError, tk.TclError):
+                        except (ValueError, TypeError):
                             pass
 
             if hasattr(self, 'vars_skills'):
@@ -951,7 +951,7 @@ class VTTCharMakerTab(ttk.Frame):
                             self.vars_inventory[i]["type"].set(i_data.get("type", ""))
                         if "count" in self.vars_inventory[i]:
                             try: self.vars_inventory[i]["count"].set(int(i_data.get("count", 0)))
-                            except: pass
+                            except Exception: pass
 
             if hasattr(self, 'vars_accessories'):
                 for a in self.vars_accessories:
@@ -964,7 +964,7 @@ class VTTCharMakerTab(ttk.Frame):
                             self.vars_accessories[i]["memo"].set(a_data.get("memo", ""))
 
             text_widgets = {
-                "text_history": getattr(self, "text_history", None), 
+                "text_history": getattr(self, "text_history", None),
                 "text_career": getattr(self, "text_career", None),
                 "text_attendance": getattr(self, "text_attendance", None),
                 "text_health": getattr(self, "text_health", None),
@@ -979,10 +979,10 @@ class VTTCharMakerTab(ttk.Frame):
                     widget.config(state="normal")
                     widget.delete("1.0", tk.END)
                     widget.insert("1.0", data.get(key, ""))
-            
+
             self.status_var.set("✓ AI生成完了！")
             print("=== 画面への反映が完了しました ===")
-            
+
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -1028,7 +1028,7 @@ class VTTCharMakerTab(ttk.Frame):
         if "lore" in data:
             for k, v in data["lore"].items():
                 if k in self.vars_lore: self.vars_lore[k].set(v)
-        
+
         text_widgets = {
             "text_history": self.text_history, "text_career": self.text_career,
             "text_attendance": self.text_attendance, "text_health": self.text_health,
@@ -1102,7 +1102,7 @@ class VTTCharMakerTab(ttk.Frame):
                 ]
             }
         }
-        
+
         self.clipboard_clear()
         self.clipboard_append(json.dumps(ccfolia_data, ensure_ascii=False))
         self.update()
@@ -1513,13 +1513,13 @@ class HistoryTab(ttk.Frame):
             summary_file = folder_path / "summary.txt"
             log_file     = folder_path / "chat_log.jsonl"
             if summary_file.exists():
-                with open(summary_file, 'r', encoding='utf-8') as f:
+                with open(summary_file, encoding='utf-8') as f:
                     info += f"【あらすじ】\n{f.read()}\n"
             else:
                 info += "【あらすじ】\n(サマリーは作成されていません)\n\n"
             if log_file.exists():
                 try:
-                    with open(log_file, 'r', encoding='utf-8') as f:
+                    with open(log_file, encoding='utf-8') as f:
                         lines = sum(1 for l in f if l.strip())
                     info += f"\n【ログ記録数】 {lines} 件\n"
                 except Exception: pass
@@ -1659,7 +1659,7 @@ class GeneratorTab(ttk.Frame):
         def run():
             user_req = self.text_input.get("1.0", "end").strip()
             try:
-                with open("configs/world_setting_compressed.txt", "r", encoding="utf-8") as f:
+                with open("configs/world_setting_compressed.txt", encoding="utf-8") as f:
                     compressed_data = f.read()
             except FileNotFoundError:
                 compressed_data = "※エラー: configs/world_setting_compressed.txt が見つかりません。"
@@ -1688,12 +1688,12 @@ class GeneratorTab(ttk.Frame):
             user_msg = f"以下の要望に合うキャラクターデータを生成してください。\n要望: {user_req}"
             try:
                 result_content, _ = self.lm_client.generate_response(
-                    system_prompt=sys_prompt, user_message=user_msg, 
+                    system_prompt=sys_prompt, user_message=user_msg,
                     temperature=0.4, max_tokens=8192, timeout=None
                 )
                 self.after(0, self._on_finish, result_content)
             except Exception as e:
-                self.after(0, lambda: self.status_var.set(f"❌ 内部エラー: {e}"))
+                self.after(0, lambda err=e: self.status_var.set(f"❌ 内部エラー: {err}"))
                 self.after(0, lambda: self.btn_gen.config(state="normal"))
         import threading
         threading.Thread(target=run, daemon=True).start()

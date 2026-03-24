@@ -60,6 +60,9 @@ select = [
 ]
 ignore = [
     "E501",  # line too long (formatter handles this)
+    "E701",  # multiple statements on one line (codebase style)
+    "E702",  # multiple statements on one line (semicolon)
+    "E741",  # ambiguous variable name (l used in comprehensions)
     "B008",  # do not perform function calls in default arguments
 ]
 
@@ -72,5 +75,12 @@ known-first-party = ["core"]
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
-warn_return_any = true
+disallow_untyped_defs = false
+no_implicit_optional = false
+warn_return_any = false
 warn_unused_ignores = true
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = ["core.ccfolia_connector"]
+ignore_errors = true

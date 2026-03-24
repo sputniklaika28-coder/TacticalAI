@@ -10,8 +10,6 @@ test_character_manager.py — CharacterManager のユニットテスト
 import json
 from pathlib import Path
 
-import pytest
-
 from core.character_manager import CharacterManager
 
 

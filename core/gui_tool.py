@@ -3,13 +3,12 @@
 # タクティカル祓魔師TRPG AIシステム - GUI設定ツール
 # ================================
 
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
 import json
 import shutil
+import subprocess
+import tkinter as tk
 from pathlib import Path
-import sys
-import os
+from tkinter import messagebox, scrolledtext, ttk
 
 # --- パス設定 ---
 _THIS = Path(__file__).resolve()
@@ -30,7 +29,7 @@ SESSIONS_DIR = BASE_DIR / "sessions"
 def load_json(path: Path) -> dict:
     if path.exists():
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, encoding='utf-8') as f:
                 content = f.read().strip()
                 if not content:
                     return {}
@@ -578,54 +577,54 @@ class HistoryTab(ttk.Frame):
     def _show_summary(self, folder_path: Path):
         self.summary_text.config(state="normal")
         self.summary_text.delete("1.0", tk.END)
-        
+
         if folder_path:
             summary_file = folder_path / "summary.txt"
             log_file = folder_path / "chat_log.jsonl"
-            
+
             info = f"【フォルダ】\n{folder_path.name}\n\n"
-            
+
             if summary_file.exists():
-                with open(summary_file, 'r', encoding='utf-8') as f:
+                with open(summary_file, encoding='utf-8') as f:
                     info += f"【あらすじ】\n{f.read()}\n"
             else:
                 info += "【あらすじ】\n(サマリーファイルは作成されていません)\n\n"
-                
+
             if log_file.exists():
                 # 行数を数えてログ件数を表示
                 try:
-                    with open(log_file, 'r', encoding='utf-8') as f:
+                    with open(log_file, encoding='utf-8') as f:
                         lines = sum(1 for line in f if line.strip())
                     info += f"\n【ログ記録数】 {lines} 件\n"
                 except Exception:
                     pass
-            
+
             self.summary_text.insert("1.0", info)
-            
+
         self.summary_text.config(state="disabled")
 
     def _on_resume(self):
         if not self.selected_folder:
             return
-            
+
         backup_dir = self.selected_folder / "configs_backup"
         if not backup_dir.exists():
             messagebox.showerror("エラー", "バックアップデータが見つかりません。")
             return
-            
+
         msg = (f"'{self.selected_folder.name}' の状態に復元しますか？\n\n"
                "※現在の 'configs' フォルダ内にあるキャラクターやプロンプト設定は上書きされます。\n"
                "（現在の設定を残したい場合は、先に手動でコピーしてください）")
-               
+
         if messagebox.askyesno("復元と再開の確認", msg):
             try:
                 # configs_backup の中身を configs に上書きコピー
                 shutil.copytree(backup_dir, CONFIGS_DIR, dirs_exist_ok=True)
-                messagebox.showinfo("復元完了", 
+                messagebox.showinfo("復元完了",
                     "設定データを復元しました。\n"
                     "他のタブを開いて設定が戻っているか確認してください。\n\n"
                     "※チャットの文脈を引き継いで再開する機能は次回のアップデートで有効になります。")
-                
+
                 # 他のタブをリフレッシュするイベントを発行
                 self.event_generate("<<ConfigsRestored>>", when="tail")
             except Exception as e:
@@ -645,7 +644,7 @@ class TacticalAIGUI(tk.Tk):
         self._build_menu()
         self._build_tabs()
         self._build_statusbar()
-        
+
         # 復元イベントを受け取ってタブを更新
         self.bind("<<ConfigsRestored>>", lambda e: self._refresh_all_tabs())
 
