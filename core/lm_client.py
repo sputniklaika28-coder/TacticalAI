@@ -95,12 +95,18 @@ class LMClient:
                 raw_content = message.get("content") or ""
                 finish_reason = result["choices"][0].get("finish_reason", "")
 
-                if not raw_content.strip():
-                    # finish_reason が "length" の場合、モデルが思考トークンで
-                    # max_tokens を使い切っており、reasoning_content は不完全な
-                    # 思考テキストなのでフォールバックしても意味がない
-                    if finish_reason != "length":
-                        raw_content = message.get("reasoning_content") or ""
+                if not raw_content.strip() and finish_reason != "length":
+                    # reasoning_content を候補として取り出し、
+                    # _clean_response 後に有効な JSON である場合のみ採用する。
+                    # thinking テキスト内の { を誤抽出しないようにするためのガード。
+                    rc = message.get("reasoning_content") or ""
+                    if rc.strip():
+                        candidate = self._clean_response(rc)
+                        try:
+                            json.loads(candidate)
+                            raw_content = rc  # 有効な JSON → フォールバック採用
+                        except (json.JSONDecodeError, ValueError):
+                            pass  # 思考テキストのゴミ → raw_content を空のまま維持
 
                 # ログを見ると、AIがJSONの中にさらに思考を書き込んでいる場合があるため、クリーン処理にかける
                 content = self._clean_response(raw_content)
