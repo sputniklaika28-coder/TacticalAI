@@ -220,8 +220,8 @@ class TestGenerateResponse:
 
         assert content == ""
 
-    def test_no_fallback_to_reasoning_when_finish_reason_length(self):
-        """finish_reason=length で content 空の場合、reasoning_content にフォールバックしない"""
+    def test_fallback_to_reasoning_when_finish_reason_length(self):
+        """finish_reason=length でも reasoning_content 内に完結した JSON があれば抽出する"""
         client = LMClient()
         api_resp = MagicMock()
         api_resp.status_code = 200
@@ -231,7 +231,7 @@ class TestGenerateResponse:
                     "finish_reason": "length",
                     "message": {
                         "content": "",
-                        "reasoning_content": 'Thinking: {"partial": true} ...',
+                        "reasoning_content": 'Thinking: {"action": "heal", "target": "ally"} more thinking...',
                         "tool_calls": None,
                     },
                 }
@@ -244,7 +244,7 @@ class TestGenerateResponse:
         ):
             content, tools = client.generate_response("sys", "user")
 
-        assert content == ""
+        assert content == '{"action": "heal", "target": "ally"}'
 
     def test_retries_with_doubled_max_tokens_when_no_think_ignored(self):
         """no_think=True でモデルが思考を無視した場合、max_tokens を倍にしてリトライする"""

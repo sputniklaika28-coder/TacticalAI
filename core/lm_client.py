@@ -94,8 +94,9 @@ class LMClient:
             f"finish_reason={finish_reason}"
         )
 
-        if not raw_content.strip() and finish_reason != "length" and has_reasoning:
+        if not raw_content.strip() and has_reasoning:
             # reasoning_content 内から有効な JSON を探す（思考テキスト混在対応）
+            # finish_reason が length（トークン上限）でも、途中に完結した JSON があれば抽出する
             found_json = self._find_json_in_text(reasoning)
             if found_json:
                 print(f"DEBUG: reasoning_content内からJSON抽出成功 (長さ={len(found_json)})")
