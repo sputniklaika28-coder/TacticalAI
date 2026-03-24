@@ -347,3 +347,66 @@ class TestGenerateResponse:
         assert "myserver:5678" in url
         payload = mock_post.call_args[1]["json"]
         assert payload["model"] == "my-model"
+
+    def test_extracts_json_from_reasoning_with_thinking_text(self):
+        """reasoning_content に思考テキストとJSONが混在する場合、JSONを抽出する"""
+        client = LMClient()
+        embedded_json = '{"name": "テスト太郎", "body": 4, "soul": 3}'
+        api_resp = MagicMock()
+        api_resp.status_code = 200
+        api_resp.json.return_value = {
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "content": "",
+                    "reasoning_content": f"まずキャラを考えます…\n{embedded_json}\nこれで完成です。",
+                    "tool_calls": None,
+                }
+            }]
+        }
+
+        with patch.object(client, "is_server_running", return_value=True), \
+             patch("core.lm_client.requests.post", return_value=api_resp):
+            content, _ = client.generate_response("sys", "user", no_think=False)
+
+        assert '"name"' in content
+        assert "テスト太郎" in content
+
+    def test_final_retry_removes_enable_thinking(self):
+        """2回リトライしても空の場合、enable_thinking を外して最終リトライする"""
+        client = LMClient()
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "content": "",
+                    "reasoning_content": "ただの思考テキスト",
+                    "tool_calls": None,
+                }
+            }]
+        }
+
+        final_resp = MagicMock()
+        final_resp.status_code = 200
+        final_resp.json.return_value = {
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "content": "",
+                    "reasoning_content": 'キャラを作ります。{"name": "最終太郎", "hp": 4}。以上。',
+                    "tool_calls": None,
+                }
+            }]
+        }
+
+        with patch.object(client, "is_server_running", return_value=True), \
+             patch("core.lm_client.requests.post", side_effect=[empty_resp, empty_resp, final_resp]) as mock_post:
+            content, _ = client.generate_response("sys", "user", no_think=True, max_tokens=4096)
+
+        assert mock_post.call_count == 3
+        # 最終リトライには chat_template_kwargs が含まれない
+        final_payload = mock_post.call_args_list[2][1]["json"]
+        assert "chat_template_kwargs" not in final_payload
+        assert "最終太郎" in content
