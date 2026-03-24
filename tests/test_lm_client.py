@@ -165,6 +165,51 @@ class TestGenerateResponse:
 
         assert content is None
 
+    def test_falls_back_to_reasoning_content_when_content_empty(self):
+        """content が空で reasoning_content に出力がある場合、そちらを使う"""
+        client = LMClient()
+        api_resp = MagicMock()
+        api_resp.status_code = 200
+        api_resp.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": '思考中…\n{"action": "heal"}',
+                        "tool_calls": None,
+                    }
+                }
+            ]
+        }
+
+        with patch.object(client, "is_server_running", return_value=True), \
+             patch("core.lm_client.requests.post", return_value=api_resp):
+            content, tools = client.generate_response("sys", "user")
+
+        assert content == '{"action": "heal"}'
+
+    def test_empty_tool_calls_list_normalized_to_none(self):
+        """tool_calls が空リスト [] の場合、None に正規化する"""
+        client = LMClient()
+        api_resp = MagicMock()
+        api_resp.status_code = 200
+        api_resp.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"action": "wait"}',
+                        "tool_calls": [],
+                    }
+                }
+            ]
+        }
+
+        with patch.object(client, "is_server_running", return_value=True), \
+             patch("core.lm_client.requests.post", return_value=api_resp):
+            content, tools = client.generate_response("sys", "user")
+
+        assert tools is None
+
     def test_custom_base_url_and_model(self):
         client = LMClient(base_url="http://myserver:5678", model="my-model")
         api_resp = MagicMock()
