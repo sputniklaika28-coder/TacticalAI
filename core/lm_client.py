@@ -93,8 +93,14 @@ class LMClient:
                 # content を取得し、空の場合は reasoning_content にフォールバック
                 # （no_think を指定してもモデルが思考トークンに全出力を入れてしまう場合の対策）
                 raw_content = message.get("content") or ""
+                finish_reason = result["choices"][0].get("finish_reason", "")
+
                 if not raw_content.strip():
-                    raw_content = message.get("reasoning_content") or ""
+                    # finish_reason が "length" の場合、モデルが思考トークンで
+                    # max_tokens を使い切っており、reasoning_content は不完全な
+                    # 思考テキストなのでフォールバックしても意味がない
+                    if finish_reason != "length":
+                        raw_content = message.get("reasoning_content") or ""
 
                 # ログを見ると、AIがJSONの中にさらに思考を書き込んでいる場合があるため、クリーン処理にかける
                 content = self._clean_response(raw_content)

@@ -166,13 +166,14 @@ class TestGenerateResponse:
         assert content is None
 
     def test_falls_back_to_reasoning_content_when_content_empty(self):
-        """content が空で reasoning_content に出力がある場合、そちらを使う"""
+        """content が空で finish_reason=stop の場合、reasoning_content を使う"""
         client = LMClient()
         api_resp = MagicMock()
         api_resp.status_code = 200
         api_resp.json.return_value = {
             "choices": [
                 {
+                    "finish_reason": "stop",
                     "message": {
                         "content": "",
                         "reasoning_content": '思考中…\n{"action": "heal"}',
@@ -187,6 +188,30 @@ class TestGenerateResponse:
             content, tools = client.generate_response("sys", "user")
 
         assert content == '{"action": "heal"}'
+
+    def test_no_fallback_to_reasoning_when_finish_reason_length(self):
+        """finish_reason=length で content 空の場合、reasoning_content にフォールバックしない"""
+        client = LMClient()
+        api_resp = MagicMock()
+        api_resp.status_code = 200
+        api_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": 'Thinking: {"partial": true} ...',
+                        "tool_calls": None,
+                    }
+                }
+            ]
+        }
+
+        with patch.object(client, "is_server_running", return_value=True), \
+             patch("core.lm_client.requests.post", return_value=api_resp):
+            content, tools = client.generate_response("sys", "user")
+
+        assert content == ""
 
     def test_empty_tool_calls_list_normalized_to_none(self):
         """tool_calls が空リスト [] の場合、None に正規化する"""
