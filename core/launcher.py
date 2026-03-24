@@ -326,7 +326,11 @@ class VTTCharMakerTab(ttk.Frame):
             for k in ["init", "cloak", "skill", "mod"]:
                 self.vars_sub_stats[stat][k].trace_add("write", lambda *args, s=stat: self._calc_sub_stat(s))
 
-        self.vars_equip = {"cloak_name": tk.StringVar(value="標準狩衣"), "weapon_name": tk.StringVar(value="支給祭具")}
+        self.vars_equip = {
+            "cloak_name": tk.StringVar(value="標準狩衣"),
+            "weapon_name": tk.StringVar(value="支給祭具"),
+            "weapon2_name": tk.StringVar(value=""),
+        }
         self.vars_combat_mods = {
             "melee": tk.IntVar(value=0), "ranged": tk.IntVar(value=0),
             "anti_body": tk.IntVar(value=0), "anti_skill": tk.IntVar(value=0),
@@ -485,13 +489,23 @@ class VTTCharMakerTab(ttk.Frame):
         f_combat.pack(fill=tk.X, pady=5, padx=5)
         ttk.Label(f_combat, text="狩衣(防具名):").grid(row=0, column=0, sticky="e")
         ttk.Entry(f_combat, textvariable=self.vars_equip["cloak_name"], width=15).grid(row=0, column=1, sticky="w")
-        ttk.Label(f_combat, text="攻性祭具(武器):").grid(row=0, column=2, sticky="e")
+        ttk.Label(f_combat, text="攻性祭具(主):").grid(row=0, column=2, sticky="e")
         ttk.Entry(f_combat, textvariable=self.vars_equip["weapon_name"], width=15).grid(row=0, column=3, sticky="w")
-        ttk.Separator(f_combat, orient=tk.HORIZONTAL).grid(row=1, column=0, columnspan=4, sticky="ew", pady=5)
+        ttk.Label(f_combat, text="攻性祭具(副):").grid(row=0, column=4, sticky="e")
+        ttk.Entry(f_combat, textvariable=self.vars_equip["weapon2_name"], width=15).grid(row=0, column=5, sticky="w")
+        ttk.Separator(f_combat, orient=tk.HORIZONTAL).grid(row=1, column=0, columnspan=6, sticky="ew", pady=5)
         ttk.Label(f_combat, text="近接判定:").grid(row=2, column=0, sticky="e")
         ttk.Entry(f_combat, textvariable=self.vars_combat_mods["melee"], width=5).grid(row=2, column=1, sticky="w")
         ttk.Label(f_combat, text="遠隔判定:").grid(row=2, column=2, sticky="e")
         ttk.Entry(f_combat, textvariable=self.vars_combat_mods["ranged"], width=5).grid(row=2, column=3, sticky="w")
+        ttk.Label(f_combat, text="対体補正:").grid(row=3, column=0, sticky="e")
+        ttk.Entry(f_combat, textvariable=self.vars_combat_mods["anti_body"], width=5).grid(row=3, column=1, sticky="w")
+        ttk.Label(f_combat, text="対巧補正:").grid(row=3, column=2, sticky="e")
+        ttk.Entry(f_combat, textvariable=self.vars_combat_mods["anti_skill"], width=5).grid(row=3, column=3, sticky="w")
+        ttk.Label(f_combat, text="対霊補正:").grid(row=4, column=0, sticky="e")
+        ttk.Entry(f_combat, textvariable=self.vars_combat_mods["anti_soul"], width=5).grid(row=4, column=1, sticky="w")
+        ttk.Label(f_combat, text="対術補正:").grid(row=4, column=2, sticky="e")
+        ttk.Entry(f_combat, textvariable=self.vars_combat_mods["anti_magic"], width=5).grid(row=4, column=3, sticky="w")
 
     def _build_page2(self, parent):
         canvas = tk.Canvas(parent, highlightthickness=0)
@@ -766,7 +780,8 @@ class VTTCharMakerTab(ttk.Frame):
                     "  \"rank\": \"(階級)\", \"department\": \"(所属)\",\n"
                     "  \"body\": 3, \"soul\": 3, \"skill\": 3, \"magic\": 3,\n"
                     "  \"hp\": 10, \"sp\": 10, \"armor\": 0, \"mobility\": 4,\n"
-                    "  \"weapon\": \"(武器名)\", \"cloak\": \"(防具名)\",\n"
+                    "  \"weapon\": \"(主武器名)\", \"weapon2\": \"(副武器名・なければ空)\", \"cloak\": \"(防具名)\",\n"
+                    "  \"combat_mods\": {\"melee\": 0, \"ranged\": 0, \"anti_body\": 0, \"anti_skill\": 0, \"anti_soul\": 0, \"anti_magic\": 0},\n"
                     "  \"skills\": [{\"name\": \"(スキル名)\", \"cost\": \"1\", \"condition\": \"無\", \"effect\": \"効果\"}],\n"
                     "  \"inventory\": [{\"name\": \"形代\", \"type\": \"支給\", \"count\": 7}],\n"
                     "  \"accessories\": [{\"name\": \"(備品)\", \"memo\": \"(メモ)\"}],\n"
@@ -852,7 +867,17 @@ class VTTCharMakerTab(ttk.Frame):
 
             if hasattr(self, 'vars_equip'):
                 if "weapon_name" in self.vars_equip: self.vars_equip["weapon_name"].set(data.get("weapon", ""))
+                if "weapon2_name" in self.vars_equip: self.vars_equip["weapon2_name"].set(data.get("weapon2", ""))
                 if "cloak_name" in self.vars_equip: self.vars_equip["cloak_name"].set(data.get("cloak", ""))
+
+            if hasattr(self, 'vars_combat_mods'):
+                mods = data.get("combat_mods", {})
+                if isinstance(mods, dict):
+                    for k in ["melee", "ranged", "anti_body", "anti_skill", "anti_soul", "anti_magic"]:
+                        try:
+                            self.vars_combat_mods[k].set(int(mods.get(k, 0)))
+                        except (ValueError, TypeError, tk.TclError):
+                            pass
 
             if hasattr(self, 'vars_skills'):
                 for s in self.vars_skills:
