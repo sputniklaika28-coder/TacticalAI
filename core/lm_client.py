@@ -158,9 +158,9 @@ class LMClient:
             if response.status_code == 200:
                 result = response.json()
                 raw_content, thinking_ignored = self._extract_content(result)
+                finish_reason = result["choices"][0].get("finish_reason", "")
 
-                # no_think が無視されて content が空の場合、max_tokens を倍にしてリトライ
-                # （モデルが思考トークンで max_tokens を消費しきった場合の救済）
+                # ── リトライ A: no_think が無視された場合のエスカレーション ──
                 if thinking_ignored and no_think:
                     print("DEBUG: thinking_ignored検出 → max_tokens×2でリトライ")
                     retry_payload = {**payload, "max_tokens": max_tokens * 2}
@@ -197,6 +197,30 @@ class LMClient:
                             if final_resp.status_code == 200:
                                 final_result = final_resp.json()
                                 raw_content, _ = self._extract_content(final_result)
+
+                # ── リトライ B: finish_reason=length で出力が空または不完全 ──
+                # no_think エスカレーションに該当しなかった場合の汎用リトライ
+                # （例: no_think=False で思考にトークンを消費、content が途中で切断）
+                elif finish_reason == "length":
+                    needs_retry = not raw_content.strip()
+                    if raw_content.strip():
+                        cleaned_check = self._clean_response(raw_content)
+                        try:
+                            json.loads(cleaned_check)
+                        except (json.JSONDecodeError, ValueError):
+                            needs_retry = True
+
+                    if needs_retry:
+                        print("DEBUG: finish_reason=length検出 → max_tokens×2でリトライ")
+                        retry_payload = {**payload, "max_tokens": max_tokens * 2}
+                        retry_resp = requests.post(
+                            f"{self.base_url}/v1/chat/completions",
+                            json=retry_payload,
+                            timeout=timeout,
+                        )
+                        if retry_resp.status_code == 200:
+                            retry_result = retry_resp.json()
+                            raw_content, _ = self._extract_content(retry_result)
 
                 # ログを見ると、AIがJSONの中にさらに思考を書き込んでいる場合があるため、クリーン処理にかける
                 content = self._clean_response(raw_content)

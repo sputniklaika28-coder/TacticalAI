@@ -492,3 +492,123 @@ class TestGenerateResponse:
 
         final_payload = mock_post.call_args_list[2][1]["json"]
         assert final_payload["temperature"] == 1.0
+
+    def test_retries_when_finish_reason_length_with_empty_content_no_think_false(self):
+        """no_think=False でも finish_reason=length + content空 なら max_tokens×2 でリトライする"""
+        client = LMClient()
+
+        # 1回目: content 空、reasoning に思考、finish_reason=length
+        first_resp = MagicMock()
+        first_resp.status_code = 200
+        first_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "長い思考テキスト…JSONなし",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+        # 2回目: リトライ成功
+        retry_resp = MagicMock()
+        retry_resp.status_code = 200
+        retry_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"name": "成功太郎"}',
+                        "reasoning_content": "",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch(
+                "core.lm_client.requests.post",
+                side_effect=[first_resp, retry_resp],
+            ) as mock_post,
+        ):
+            content, _ = client.generate_response("sys", "user", no_think=False, max_tokens=8192)
+
+        assert mock_post.call_count == 2
+        retry_payload = mock_post.call_args_list[1][1]["json"]
+        assert retry_payload["max_tokens"] == 8192 * 2
+        assert content == '{"name": "成功太郎"}'
+
+    def test_retries_when_finish_reason_length_with_truncated_json(self):
+        """finish_reason=length で content が途中で切れた不完全 JSON の場合もリトライする"""
+        client = LMClient()
+
+        # 1回目: 途中で切れた JSON
+        first_resp = MagicMock()
+        first_resp.status_code = 200
+        first_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": '{"name": "テスト", "skills": [',
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+        # 2回目: 完全な JSON
+        retry_resp = MagicMock()
+        retry_resp.status_code = 200
+        retry_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"name": "テスト", "skills": ["剣術"]}',
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch(
+                "core.lm_client.requests.post",
+                side_effect=[first_resp, retry_resp],
+            ) as mock_post,
+        ):
+            content, _ = client.generate_response("sys", "user", max_tokens=4096)
+
+        assert mock_post.call_count == 2
+        assert content == '{"name": "テスト", "skills": ["剣術"]}'
+
+    def test_no_retry_when_finish_reason_length_but_valid_json(self):
+        """finish_reason=length でも content が有効な JSON ならリトライしない"""
+        client = LMClient()
+        api_resp = MagicMock()
+        api_resp.status_code = 200
+        api_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": '{"name": "完結太郎"} 余分なテキスト',
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=api_resp) as mock_post,
+        ):
+            content, _ = client.generate_response("sys", "user")
+
+        assert mock_post.call_count == 1
+        assert content == '{"name": "完結太郎"}'
