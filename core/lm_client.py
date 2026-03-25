@@ -94,8 +94,9 @@ class LMClient:
             f"finish_reason={finish_reason}"
         )
 
-        if not raw_content.strip() and finish_reason != "length" and has_reasoning:
+        if not raw_content.strip() and has_reasoning:
             # reasoning_content 内から有効な JSON を探す（思考テキスト混在対応）
+            # finish_reason が length（トークン上限）でも、途中に完結した JSON があれば抽出する
             found_json = self._find_json_in_text(reasoning)
             if found_json:
                 print(f"DEBUG: reasoning_content内からJSON抽出成功 (長さ={len(found_json)})")
@@ -172,15 +173,22 @@ class LMClient:
                         retry_result = retry_resp.json()
                         raw_content, still_ignored = self._extract_content(retry_result)
 
-                        # それでもダメなら、enable_thinking を外してリトライ
-                        # （思考を許可し、reasoning_content 内の JSON を抽出する）
+                        # それでもダメなら、思考制限を完全に解除してリトライ
+                        # ・/no_think プレフィックスを除去した素のプロンプトで再構築
+                        # ・max_tokens を ×4 に拡大（思考+出力の両方に十分な余裕）
+                        # ・temperature を微増して決定論的な失敗ループを回避
                         if still_ignored:
-                            print("DEBUG: リトライも空 → enable_thinking解除で最終リトライ")
+                            print("DEBUG: リトライも空 → 思考許可+max_tokens×4で最終リトライ")
+                            final_messages = [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_message},
+                            ]
                             final_payload = {
-                                k: v
-                                for k, v in retry_payload.items()
-                                if k != "chat_template_kwargs"
+                                k: v for k, v in payload.items() if k != "chat_template_kwargs"
                             }
+                            final_payload["messages"] = final_messages
+                            final_payload["max_tokens"] = max_tokens * 4
+                            final_payload["temperature"] = min(temperature + 0.1, 1.0)
                             final_resp = requests.post(
                                 f"{self.base_url}/v1/chat/completions",
                                 json=final_payload,
