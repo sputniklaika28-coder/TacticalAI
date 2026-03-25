@@ -392,8 +392,8 @@ class TestGenerateResponse:
         assert '"name"' in content
         assert "テスト太郎" in content
 
-    def test_final_retry_removes_enable_thinking(self):
-        """2回リトライしても空の場合、enable_thinking を外して最終リトライする"""
+    def test_final_retry_removes_thinking_and_increases_tokens(self):
+        """2回リトライしても空の場合、思考制限を完全解除して最終リトライする"""
         client = LMClient()
         empty_resp = MagicMock()
         empty_resp.status_code = 200
@@ -428,13 +428,67 @@ class TestGenerateResponse:
         with (
             patch.object(client, "is_server_running", return_value=True),
             patch(
-                "core.lm_client.requests.post", side_effect=[empty_resp, empty_resp, final_resp]
+                "core.lm_client.requests.post",
+                side_effect=[empty_resp, empty_resp, final_resp],
             ) as mock_post,
         ):
-            content, _ = client.generate_response("sys", "user", no_think=True, max_tokens=4096)
+            content, _ = client.generate_response(
+                "sys", "user", no_think=True, max_tokens=4096, temperature=0.1
+            )
 
         assert mock_post.call_count == 3
-        # 最終リトライには chat_template_kwargs が含まれない
         final_payload = mock_post.call_args_list[2][1]["json"]
+        # chat_template_kwargs が除去されている
         assert "chat_template_kwargs" not in final_payload
+        # /no_think プレフィックスが除去されている
+        assert not final_payload["messages"][0]["content"].startswith("/no_think")
+        # max_tokens が ×4 に拡大されている
+        assert final_payload["max_tokens"] == 4096 * 4
+        # temperature が +0.1 されている
+        assert final_payload["temperature"] == 0.2
         assert "最終太郎" in content
+
+    def test_final_retry_caps_temperature_at_1(self):
+        """最終リトライの temperature は 1.0 を超えない"""
+        client = LMClient()
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "思考のみ",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        final_resp = MagicMock()
+        final_resp.status_code = 200
+        final_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"ok": true}',
+                        "reasoning_content": "",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch(
+                "core.lm_client.requests.post",
+                side_effect=[empty_resp, empty_resp, final_resp],
+            ) as mock_post,
+        ):
+            client.generate_response("sys", "user", no_think=True, max_tokens=300, temperature=0.95)
+
+        final_payload = mock_post.call_args_list[2][1]["json"]
+        assert final_payload["temperature"] == 1.0
