@@ -75,12 +75,15 @@ class LMClient:
             i = start + 1
         return best
 
-    def _extract_content(self, result: dict) -> tuple[str, bool]:
+    def _extract_content(self, result: dict) -> tuple[str, bool, str, bool]:
         """API レスポンスから content を抽出する。
 
         Returns:
-            (raw_content, thinking_ignored): raw_content はモデルの出力テキスト。
-            thinking_ignored は content が空で reasoning_content に思考が入っていた場合 True。
+            (raw_content, thinking_ignored, finish_reason, content_was_empty):
+            - raw_content: モデルの出力テキスト（reasoning フォールバック適用後）
+            - thinking_ignored: content が空で reasoning_content に思考が入っていた場合 True
+            - finish_reason: API レスポンスの finish_reason
+            - content_was_empty: 元の content が空だった場合 True（reasoning フォールバック前）
         """
         message = result["choices"][0]["message"]
         raw_content = message.get("content") or ""
@@ -94,7 +97,9 @@ class LMClient:
             f"finish_reason={finish_reason}"
         )
 
-        if not raw_content.strip() and has_reasoning:
+        content_was_empty = not raw_content.strip()
+
+        if content_was_empty and has_reasoning:
             # reasoning_content 内から有効な JSON を探す（思考テキスト混在対応）
             # finish_reason が length（トークン上限）でも、途中に完結した JSON があれば抽出する
             found_json = self._find_json_in_text(reasoning)
@@ -103,7 +108,7 @@ class LMClient:
                 raw_content = found_json
 
         thinking_ignored = not raw_content.strip() and has_reasoning
-        return raw_content, thinking_ignored
+        return raw_content, thinking_ignored, finish_reason, content_was_empty
 
     def generate_response(
         self,
@@ -157,12 +162,19 @@ class LMClient:
             )
             if response.status_code == 200:
                 result = response.json()
-                raw_content, thinking_ignored = self._extract_content(result)
+                raw_content, thinking_ignored, finish_reason, content_was_empty = (
+                    self._extract_content(result)
+                )
 
-                # no_think が無視されて content が空の場合、max_tokens を倍にしてリトライ
-                # （モデルが思考トークンで max_tokens を消費しきった場合の救済）
-                if thinking_ignored and no_think:
-                    print("DEBUG: thinking_ignored検出 → max_tokens×2でリトライ")
+                # リトライ判定:
+                # 1. no_think が無視されて content が空（思考トークンで消費しきった）
+                # 2. finish_reason=length で元の content が空（トークン上限到達）
+                needs_retry = (thinking_ignored and no_think) or (
+                    finish_reason == "length" and content_was_empty
+                )
+
+                if needs_retry:
+                    print("DEBUG: content空検出 → max_tokens×2でリトライ")
                     retry_payload = {**payload, "max_tokens": max_tokens * 2}
                     retry_resp = requests.post(
                         f"{self.base_url}/v1/chat/completions",
@@ -171,14 +183,19 @@ class LMClient:
                     )
                     if retry_resp.status_code == 200:
                         retry_result = retry_resp.json()
-                        raw_content, still_ignored = self._extract_content(retry_result)
+                        raw_content, still_ignored, retry_finish, retry_empty = (
+                            self._extract_content(retry_result)
+                        )
 
-                        # それでもダメなら、思考制限を完全に解除してリトライ
-                        # ・/no_think プレフィックスを除去した素のプロンプトで再構築
+                        # それでもダメなら最終リトライ
                         # ・max_tokens を ×4 に拡大（思考+出力の両方に十分な余裕）
                         # ・temperature を微増して決定論的な失敗ループを回避
-                        if still_ignored:
-                            print("DEBUG: リトライも空 → 思考許可+max_tokens×4で最終リトライ")
+                        # ・no_think の場合は思考制限を完全に解除
+                        still_needs_retry = (still_ignored and no_think) or (
+                            retry_finish == "length" and retry_empty
+                        )
+                        if still_needs_retry:
+                            print("DEBUG: リトライも空 → max_tokens×4で最終リトライ")
                             final_messages = [
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": user_message},
@@ -196,7 +213,7 @@ class LMClient:
                             )
                             if final_resp.status_code == 200:
                                 final_result = final_resp.json()
-                                raw_content, _ = self._extract_content(final_result)
+                                raw_content, _, _, _ = self._extract_content(final_result)
 
                 # ログを見ると、AIがJSONの中にさらに思考を書き込んでいる場合があるため、クリーン処理にかける
                 content = self._clean_response(raw_content)
