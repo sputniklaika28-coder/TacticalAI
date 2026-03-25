@@ -296,8 +296,8 @@ class TestGenerateResponse:
         retry_payload = mock_post.call_args_list[1][1]["json"]
         assert retry_payload["max_tokens"] == 8192
 
-    def test_no_retry_when_no_think_is_false(self):
-        """no_think=False の場合、思考が無視されてもリトライしない"""
+    def test_no_retry_when_no_think_is_false_and_finish_reason_stop(self):
+        """no_think=False かつ finish_reason=stop の場合、思考が無視されてもリトライしない"""
         client = LMClient()
         api_resp = MagicMock()
         api_resp.status_code = 200
@@ -322,6 +322,107 @@ class TestGenerateResponse:
 
         assert content == ""
         assert mock_post.call_count == 1  # リトライなし
+
+    def test_retries_on_finish_reason_length_without_no_think(self):
+        """no_think=False でも finish_reason=length で content 空なら max_tokens×2 でリトライする"""
+        client = LMClient()
+
+        # 1回目: finish_reason=length, content 空
+        first_resp = MagicMock()
+        first_resp.status_code = 200
+        first_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "長い思考テキスト...",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+        # 2回目: リトライ成功
+        retry_resp = MagicMock()
+        retry_resp.status_code = 200
+        retry_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"name": "リトライ成功"}',
+                        "reasoning_content": "",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch(
+                "core.lm_client.requests.post", side_effect=[first_resp, retry_resp]
+            ) as mock_post,
+        ):
+            content, tools = client.generate_response(
+                "sys", "user", max_tokens=8192, no_think=False
+            )
+
+        assert content == '{"name": "リトライ成功"}'
+        assert mock_post.call_count == 2
+        retry_payload = mock_post.call_args_list[1][1]["json"]
+        assert retry_payload["max_tokens"] == 16384
+
+    def test_final_retry_on_finish_reason_length_without_no_think(self):
+        """no_think=False でも finish_reason=length が連続すれば最終リトライ（×4）する"""
+        client = LMClient()
+
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "思考のみ...",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        final_resp = MagicMock()
+        final_resp.status_code = 200
+        final_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"name": "最終リトライ成功"}',
+                        "reasoning_content": "",
+                        "tool_calls": None,
+                    },
+                }
+            ]
+        }
+
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch(
+                "core.lm_client.requests.post",
+                side_effect=[empty_resp, empty_resp, final_resp],
+            ) as mock_post,
+        ):
+            content, _ = client.generate_response(
+                "sys", "user", max_tokens=8192, no_think=False, temperature=0.7
+            )
+
+        assert mock_post.call_count == 3
+        assert "最終リトライ成功" in content
+        final_payload = mock_post.call_args_list[2][1]["json"]
+        assert final_payload["max_tokens"] == 8192 * 4
+        assert abs(final_payload["temperature"] - 0.8) < 1e-9
 
     def test_empty_tool_calls_list_normalized_to_none(self):
         """tool_calls が空リスト [] の場合、None に正規化する"""
