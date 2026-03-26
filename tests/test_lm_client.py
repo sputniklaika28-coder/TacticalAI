@@ -593,3 +593,160 @@ class TestGenerateResponse:
 
         final_payload = mock_post.call_args_list[2][1]["json"]
         assert final_payload["temperature"] == 1.0
+
+
+# ──────────────────────────────────────────
+# generate_with_tools
+# ──────────────────────────────────────────
+
+
+class TestGenerateWithTools:
+    def test_returns_none_when_server_not_running(self):
+        client = LMClient()
+        with patch.object(client, "is_server_running", return_value=False):
+            content, tools = client.generate_with_tools(
+                [{"role": "user", "content": "hello"}],
+                [],
+            )
+        assert content is None
+        assert tools is None
+
+    def test_returns_content_and_tool_calls(self):
+        client = LMClient()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "考えています",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {
+                                    "name": "post_chat",
+                                    "arguments": '{"text": "こんにちは"}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=mock_resp),
+        ):
+            content, tool_calls = client.generate_with_tools(
+                [{"role": "user", "content": "test"}],
+                [{"type": "function", "function": {"name": "post_chat"}}],
+            )
+        assert content == "考えています"
+        assert tool_calls is not None
+        assert len(tool_calls) == 1
+        assert tool_calls[0]["function"]["name"] == "post_chat"
+
+    def test_returns_content_only_when_no_tool_calls(self):
+        client = LMClient()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "plain text response"}}]
+        }
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=mock_resp),
+        ):
+            content, tool_calls = client.generate_with_tools(
+                [{"role": "user", "content": "test"}], []
+            )
+        assert content == "plain text response"
+        assert tool_calls is None
+
+    def test_strips_think_tags_from_content(self):
+        client = LMClient()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [
+                {"message": {"content": "<think>考え中</think>結果のテキスト"}}
+            ]
+        }
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=mock_resp),
+        ):
+            content, _ = client.generate_with_tools(
+                [{"role": "user", "content": "test"}], []
+            )
+        assert content == "結果のテキスト"
+
+    def test_includes_tools_in_payload(self):
+        client = LMClient()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}]
+        }
+        tools = [{"type": "function", "function": {"name": "test_tool"}}]
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=mock_resp) as mock_post,
+        ):
+            client.generate_with_tools(
+                [{"role": "user", "content": "test"}], tools
+            )
+        payload = mock_post.call_args[1]["json"]
+        assert payload["tools"] == tools
+        assert payload["tool_choice"] == "auto"
+
+    def test_adds_image_to_last_user_message(self):
+        client = LMClient()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "I see an image"}}]
+        }
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=mock_resp) as mock_post,
+        ):
+            client.generate_with_tools(
+                [
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "describe this"},
+                ],
+                [],
+                image_base64="iVBORw0KGgo=",
+            )
+        payload = mock_post.call_args[1]["json"]
+        user_msg = payload["messages"][1]
+        assert isinstance(user_msg["content"], list)
+        assert user_msg["content"][0]["type"] == "text"
+        assert user_msg["content"][1]["type"] == "image_url"
+
+    def test_handles_api_error(self):
+        client = LMClient()
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", side_effect=Exception("timeout")),
+        ):
+            content, tools = client.generate_with_tools(
+                [{"role": "user", "content": "test"}], []
+            )
+        assert content is None
+        assert tools is None
+
+    def test_handles_non_200_status(self):
+        client = LMClient()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        with (
+            patch.object(client, "is_server_running", return_value=True),
+            patch("core.lm_client.requests.post", return_value=mock_resp),
+        ):
+            content, tools = client.generate_with_tools(
+                [{"role": "user", "content": "test"}], []
+            )
+        assert content is None
+        assert tools is None
