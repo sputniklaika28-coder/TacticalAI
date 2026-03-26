@@ -14,10 +14,6 @@ import logging
 import re
 from pathlib import Path
 
-import chromadb
-from chromadb.config import Settings
-from duckduckgo_search import DDGS
-
 logger = logging.getLogger(__name__)
 
 # テキスト分割のデフォルト設定
@@ -47,20 +43,32 @@ class KnowledgeManager:
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
 
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_dir),
-            settings=Settings(anonymized_telemetry=False),
-        )
-        self.collection = self.client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
-        logger.info(
-            "KnowledgeManager 初期化: persist_dir=%s, collection=%s (docs=%d)",
-            self.persist_dir,
-            collection_name,
-            self.collection.count(),
-        )
+        self.client = None
+        self.collection = None
+
+        try:
+            import chromadb
+            from chromadb.config import Settings
+
+            self.client = chromadb.PersistentClient(
+                path=str(self.persist_dir),
+                settings=Settings(anonymized_telemetry=False),
+            )
+            self.collection = self.client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+            logger.info(
+                "KnowledgeManager 初期化: persist_dir=%s, collection=%s (docs=%d)",
+                self.persist_dir,
+                collection_name,
+                self.collection.count(),
+            )
+        except ImportError:
+            logger.warning(
+                "chromadb が未インストールです。ベクトル検索機能は無効化されます。"
+                " pip install chromadb でインストールしてください。"
+            )
 
     # ──────────────────────────────────────────
     # ドキュメント登録
@@ -83,6 +91,10 @@ class KnowledgeManager:
             登録されたドキュメント数。
         """
         if not texts:
+            return 0
+
+        if self.collection is None:
+            logger.warning("ChromaDB 未初期化のためドキュメント登録をスキップしました。")
             return 0
 
         if metadatas is None:
@@ -113,6 +125,10 @@ class KnowledgeManager:
             - metadata: dict — メタデータ
             - distance: float — コサイン距離（小さいほど類似）
         """
+        if self.collection is None:
+            logger.warning("ChromaDB 未初期化のため検索をスキップしました。")
+            return []
+
         if self.collection.count() == 0:
             logger.warning("コレクションが空です。先にドキュメントを登録してください。")
             return []
@@ -149,6 +165,15 @@ class KnowledgeManager:
             - url: str — ページURL
             - snippet: str — 要約テキスト
         """
+        try:
+            from duckduckgo_search import DDGS
+        except ImportError:
+            logger.warning(
+                "duckduckgo-search が未インストールです。ウェブ検索は利用できません。"
+                " pip install duckduckgo-search でインストールしてください。"
+            )
+            return []
+
         try:
             with DDGS() as ddgs:
                 raw_results = list(ddgs.text(query, max_results=max_results))
@@ -339,6 +364,6 @@ class KnowledgeManager:
     def get_stats(self) -> dict:
         """コレクションの統計情報を返す。"""
         return {
-            "document_count": self.collection.count(),
+            "document_count": self.collection.count() if self.collection is not None else 0,
             "persist_dir": str(self.persist_dir),
         }
