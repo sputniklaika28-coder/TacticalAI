@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import json
 import re
@@ -223,4 +225,86 @@ class LMClient:
             return None, None
         except Exception as e:
             print(f"   ⚠️  LM-Studio通信エラー: {str(e)}")
+            return None, None
+
+    def generate_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        temperature: float = 0.7,
+        max_tokens: int = 1500,
+        timeout: int | None = 600,
+        image_base64: str | None = None,
+    ) -> tuple[str | None, list[dict] | None]:
+        """ツール呼び出し対応のLLM推論。マルチターンメッセージ対応。
+
+        Args:
+            messages: OpenAI形式のメッセージリスト（system/user/assistant/tool）。
+            tools: ツール定義のリスト（OpenAI function calling形式）。
+            temperature: 生成温度。
+            max_tokens: 最大トークン数。
+            timeout: リクエストタイムアウト（秒）。
+            image_base64: ビジョンモデル用のBase64エンコード画像（省略可）。
+
+        Returns:
+            (content, tool_calls) のタプル。
+            - content: モデルの出力テキスト（tool_callsがある場合は思考テキスト）。
+            - tool_calls: ツール呼び出しリスト。呼び出しがない場合はNone。
+        """
+        if not self.is_server_running():
+            return None, None
+
+        # メッセージを深コピーして画像を追加
+        payload_messages = copy.deepcopy(messages)
+
+        # 画像がある場合、最後の user メッセージにマルチモーダルコンテンツとして追加
+        if image_base64:
+            for msg in reversed(payload_messages):
+                if msg["role"] == "user":
+                    text_content = msg.get("content", "")
+                    if isinstance(text_content, str):
+                        msg["content"] = [
+                            {"type": "text", "text": text_content},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{image_base64}",
+                                },
+                            },
+                        ]
+                    break
+
+        payload: dict = {
+            "model": self.model,
+            "messages": payload_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+
+        # ツール定義を追加（空の場合はツール無し推論）
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/chat/completions",
+                json=payload,
+                timeout=timeout,
+            )
+            if response.status_code == 200:
+                result = response.json()
+                message = result["choices"][0]["message"]
+                content = message.get("content") or ""
+                tool_calls = message.get("tool_calls") or None
+
+                # <think> タグがある場合はクリーンアップ
+                if content and "</think>" in content:
+                    content = content.split("</think>")[-1].strip()
+
+                return content or None, tool_calls
+            return None, None
+        except Exception as e:
+            print(f"   ⚠️  LM-Studio通信エラー (generate_with_tools): {str(e)}")
             return None, None

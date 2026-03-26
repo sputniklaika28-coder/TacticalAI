@@ -2,53 +2,40 @@
 # ================================
 # ファイル: core/ccfolia_connector.py
 # CCFolia連携 - チャット監視 + 自動投稿 + セッション記録 + エージェント機能
+#
+# リファクタ版: Selenium を排除し VTTアダプター（Playwright）に委譲。
+# KnowledgeManager による RAG/Web検索ツールを統合。
 # ================================
 
+from __future__ import annotations
+
+import base64
 import json
+import logging
 import re
 import sys
 import threading
 import time
 from pathlib import Path
 
-# Selenium
-from selenium import webdriver
-from selenium.common.exceptions import (
-    TimeoutException,
-)
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
-
 # 同階層モジュール
 sys.path.insert(0, str(Path(__file__).parent))
 from ccfolia_map_controller import MAP_TOOLS, CCFoliaMapController, execute_map_tool
 from character_manager import CharacterManager
+from knowledge_manager import KnowledgeManager
 from lm_client import LMClient
 from main import PromptManager
 from session_manager import SessionManager
+from vtt_adapters.ccfolia_adapter import CCFoliaAdapter
 
-# ==========================================
-# CCFolia CSSセレクタ定義
-# ==========================================
-
-
-class CCFoliaSelectors:
-    CHAT_LIST = "ul.MuiList-root"
-    CHAT_MESSAGES = "ul.MuiList-root > div, ul.MuiList-root > li"
-    CHAT_INPUT = "textarea"
-    SEND_BUTTON = "button[class*='MuiButton']"
-    PIECE_SELECT = "[class*='MuiBox']"
-    PIECE_ITEM = "li, [role='option'], [role='menuitem']"
+logger = logging.getLogger(__name__)
 
 
 # ==========================================
 # エージェント専用 ツール定義
 # ==========================================
 
-AGENT_TOOLS = [
+AGENT_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
@@ -71,8 +58,43 @@ AGENT_TOOLS = [
     },
 ]
 
-# マップ操作ツールと結合
-ALL_TOOLS = AGENT_TOOLS + MAP_TOOLS
+# ==========================================
+# ナレッジ検索ツール定義
+# ==========================================
+
+KNOWLEDGE_TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_knowledge_base",
+            "description": "ルールブックやセッションログをベクトル検索する",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "検索クエリ"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web",
+            "description": "インターネットで情報を検索する",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "検索クエリ"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
+
+# 全ツール結合
+ALL_TOOLS: list[dict] = AGENT_TOOLS + MAP_TOOLS + KNOWLEDGE_TOOLS
 
 
 # ==========================================
@@ -86,8 +108,8 @@ class CharacterDetector:
         self.default_id = default_id
         self._build_keyword_map()
 
-    def _build_keyword_map(self):
-        self.keyword_map = {}
+    def _build_keyword_map(self) -> None:
+        self.keyword_map: dict[str, list[str]] = {}
         for char_id, char in self.cm.characters.items():
             if not char.get("is_ai") or not char.get("enabled"):
                 continue
@@ -95,7 +117,7 @@ class CharacterDetector:
             self.keyword_map[char_id] = [k for k in keywords if k]
 
     def detect(self, message: str) -> list[str]:
-        matched_ids = []
+        matched_ids: list[str] = []
         for char_id, keywords in self.keyword_map.items():
             for kw in keywords:
                 if kw and kw in message:
@@ -104,7 +126,7 @@ class CharacterDetector:
                     break
         return matched_ids
 
-    def reload(self):
+    def reload(self) -> None:
         self.cm.load_characters()
         self._build_keyword_map()
 
@@ -116,20 +138,21 @@ class CharacterDetector:
 
 class SessionContext:
     _DICE_RE = re.compile(r"\d*[dDbB]\d+|b\d+", re.IGNORECASE)
-    _PHASE_KEYWORDS = {
+    _PHASE_KEYWORDS: dict[str, list[str]] = {
         "combat": ["戦闘開始", "戦闘スタート", "エンカウント", "敵が現れ"],
         "mission": ["ミッション開始", "ミッションフェイズ", "突入"],
         "assessment": ["査定フェイズ", "帰還"],
         "briefing": ["ブリーフィング"],
     }
-    # フェイズの進行度を定義（一度進んだら自動判定では戻らないようにする）
-    _PHASE_ORDER = {"free": 0, "briefing": 1, "mission": 2, "combat": 3, "assessment": 4}
+    _PHASE_ORDER: dict[str, int] = {
+        "free": 0, "briefing": 1, "mission": 2, "combat": 3, "assessment": 4
+    }
 
-    def __init__(self):
-        self.phase = "free"
-        self.history = []
+    def __init__(self) -> None:
+        self.phase: str = "free"
+        self.history: list[dict] = []
 
-    def update_phase(self, body: str, is_ai: bool = False):
+    def update_phase(self, body: str, is_ai: bool = False) -> None:
         if is_ai:
             return
         new_phase = self.phase
@@ -140,7 +163,7 @@ class SessionContext:
         if self._PHASE_ORDER.get(new_phase, 0) > self._PHASE_ORDER.get(self.phase, 0):
             self.phase = new_phase
 
-    def add_message(self, speaker: str, body: str, is_ai: bool = False):
+    def add_message(self, speaker: str, body: str, is_ai: bool = False) -> None:
         self.history.append({"speaker": speaker, "body": body})
         self.history = self.history[-100:]
         self.update_phase(body, is_ai)
@@ -165,8 +188,8 @@ class CCFoliaConnector:
         room_url: str,
         default_character_id: str = "meta_gm",
         headless: bool = False,
-        poll_interval: float = None,
-    ):
+        poll_interval: float | None = None,
+    ) -> None:
         self.room_url = room_url
         self.poll_interval = poll_interval or self.POLL_INTERVAL
         self.headless = headless
@@ -179,153 +202,139 @@ class CCFoliaConnector:
         self.sm = SessionManager(Path(__file__).parent.parent)
         self.world_setting = self._load_world_setting()
 
-        self.driver: webdriver.Chrome | None = None
+        # VTTアダプター（Playwright ベース）
+        self.adapter: CCFoliaAdapter | None = None
         self.map_ctrl: CCFoliaMapController | None = None
-        self._known_messages: list[dict] = []
+
+        # KnowledgeManager（RAG + Web検索）
+        self.knowledge_manager: KnowledgeManager | None = None
+
+        self._known_messages: list[str] = []
         self._sent_bodies: set[str] = set()
         self._running = False
 
-    def _init_driver(self):
-        opts = Options()
-        if self.headless:
-            opts.add_argument("--headless=new")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("--window-size=1280,900")
-        opts.add_argument("--lang=ja")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-dev-shm-usage")
+    # ──────────────────────────────────────────
+    # 初期化 / 終了
+    # ──────────────────────────────────────────
 
-        opts.add_argument("--disable-blink-features=AutomationControlled")
-        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-        opts.add_experimental_option("useAutomationExtension", False)
+    def _init_adapter(self) -> None:
+        """VTTアダプターを初期化してCCFoliaに接続する。"""
+        print("⏳ Playwright でブラウザを起動しています...")
+        self.adapter = CCFoliaAdapter()
+        self.adapter.connect(self.room_url, headless=self.headless)
+        self.map_ctrl = CCFoliaMapController(adapter=self.adapter)
+        print(f"✓ CCFoliaに接続: {self.room_url}")
 
-        base = Path.home() / "AppData/Local/TacticalAI"
-        base.mkdir(parents=True, exist_ok=True)
-        profile_dir = base / "ChromeProfile_AI"
-        profile_dir.mkdir(parents=True, exist_ok=True)
-        opts.add_argument(f"--user-data-dir={profile_dir}")
-
-        opts.add_argument(f"--app={self.room_url}")
-
-        print("⏳ AI専用のアプリウィンドウを自動起動しています...")
-        self.driver = webdriver.Chrome(options=opts)
-
-        self.driver.execute_cdp_cmd(
-            "Page.addScriptToEvaluateOnNewDocument",
-            {
-                "source": """
-                Object.defineProperty(navigator, 'webdriver', {
-                  get: () => undefined
-                })
-            """
-            },
-        )
-
-        if self.driver.current_url == "data:,":
-            self.driver.get(self.room_url)
-
-        print(f"✓ CCFoliaアプリに接続: {self.room_url}")
-
+    def _init_knowledge(self) -> None:
+        """KnowledgeManager を初期化し、世界観データを取り込む。"""
         try:
-            WebDriverWait(self.driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, CCFoliaSelectors.CHAT_INPUT))
-            )
-            print("✓ チャット入力欄を確認")
-        except TimeoutException:
-            print("⚠️  チャット入力欄が見つかりません。（ログインや入室操作を行ってください）")
+            self.knowledge_manager = KnowledgeManager()
+            ws_path = self.sm.configs_dir / "world_setting.json"
+            if ws_path.exists():
+                count = self.knowledge_manager.ingest_world_setting(ws_path)
+                print(f"✓ 世界観データを {count} チャンク登録しました")
+        except Exception as e:
+            logger.warning("KnowledgeManager 初期化エラー: %s", e)
+            self.knowledge_manager = None
 
-        self.map_ctrl = CCFoliaMapController(self.driver)
-
-    def _close_driver(self):
-        if self.driver:
+    def _close_adapter(self) -> None:
+        """VTTアダプターを閉じる。"""
+        if self.adapter:
             try:
-                self.driver.quit()
+                self.adapter.close()
             except Exception:
                 pass
             finally:
-                self.driver, self.map_ctrl = None, None
+                self.adapter = None
+                self.map_ctrl = None
 
-    def _close_alert(self):
-        try:
-            alert = self.driver.switch_to.alert
-            alert.dismiss()
-        except Exception:
-            pass
+    # ──────────────────────────────────────────
+    # チャット操作（アダプター委譲）
+    # ──────────────────────────────────────────
 
     def _get_chat_messages(self) -> list[dict]:
-        messages = []
-        try:
-            items = self.driver.find_elements(By.CSS_SELECTOR, "div.MuiListItemText-root")
-            for el in items:
-                lines = [l.strip() for l in el.text.strip().splitlines() if l.strip()]
-                if len(lines) >= 2:
-                    speaker, body = lines[0], " ".join(lines[1:])
-                    if speaker not in ["メイン", "情報", "noname"] and "[AI]" not in speaker:
-                        messages.append({"speaker": speaker, "body": body})
-        except Exception:
-            pass
-        return messages
+        """チャットメッセージを取得する。"""
+        if self.adapter is None:
+            return []
+        return self.adapter.get_chat_messages()
 
-    # ★ 最強自動入力ロジック（JavaScriptによる瞬間ペースト）
     def _post_message(self, character_name: str, text: str) -> bool:
-        import time
-
-        from selenium.webdriver.common.by import By
-
-        try:
-            self.driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-            time.sleep(0.2)
-
-            # 駒選択
-            try:
-                self.driver.find_element(By.CSS_SELECTOR, CCFoliaSelectors.PIECE_SELECT).click()
-                time.sleep(0.3)
-                for item in self.driver.find_elements(By.CSS_SELECTOR, CCFoliaSelectors.PIECE_ITEM):
-                    if character_name in item.text:
-                        item.click()
-                        time.sleep(0.2)
-                        break
-                else:
-                    self.driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-            except Exception:
-                pass
-
-            time.sleep(0.2)
-            inputs = self.driver.find_elements(By.CSS_SELECTOR, CCFoliaSelectors.CHAT_INPUT)
-            if len(inputs) >= 2:
-                inputs[0].send_keys(Keys.CONTROL + "a", character_name)
-
-            input_el = inputs[-1]
-            input_el.click()
-            input_el.send_keys(Keys.CONTROL + "a", Keys.BACKSPACE)
-            time.sleep(0.1)
-
-            # ★【修正ポイント】改行(\n)が勝手に「送信」にならないよう、Shift+Enterで入力する
-            lines = text.split("\n")
-            for i, line in enumerate(lines):
-                if line:
-                    input_el.send_keys(line)
-                # 最後の行以外は、Shift+Enterで改行を入力
-                if i < len(lines) - 1:
-                    input_el.send_keys(Keys.SHIFT, Keys.RETURN)
-
-            time.sleep(0.3)
-            # 最後にEnterを1回だけ押して確実に送信する
-            input_el.send_keys(Keys.RETURN)
-            time.sleep(0.5)
-            return True
-        except Exception as e:
-            print(f"❌ 送信エラー: {e}")
+        """チャットメッセージを送信する。"""
+        if self.adapter is None:
             return False
+        return self.adapter.send_chat(character_name, text)
 
-    def _post_system_message(self, character_name: str, text: str):
+    def _post_system_message(self, character_name: str, text: str) -> None:
+        """AIプレフィックス付きのシステムメッセージを送信する。"""
         tagged = self.AI_PREFIX + text
         ok = self._post_message(character_name, tagged)
         if ok:
             self._sent_bodies.add(tagged[:80])
             self.ctx.add_message(character_name, tagged, is_ai=True)
 
-    def _run_agent_loop(self, target_char: dict, target_id: str, enriched_body: str):
+    # ──────────────────────────────────────────
+    # ツールディスパッチャー
+    # ──────────────────────────────────────────
+
+    def _execute_tool(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        char_name: str,
+        tool_call_id: str,
+    ) -> tuple[bool, str | None]:
+        """ツール呼び出しを実行し、(finished, tool_result_json) を返す。
+
+        Returns:
+            (finished, result_json): finished=True の場合ループ終了。
+            result_json はツール結果のJSON文字列（メッセージ履歴に追加用）。
+        """
+        if tool_name == "finish":
+            return True, None
+
+        if tool_name == "post_chat":
+            text = tool_args.get("text", "")
+            if text:
+                tagged = self.AI_PREFIX + text
+                ok = self._post_message(char_name, tagged)
+                if ok:
+                    self._sent_bodies.add(tagged[:80])
+                    self.ctx.add_message(char_name, tagged, is_ai=True)
+                    print(f"      ✓ 発言: {text[:40]}...")
+            return False, json.dumps({"ok": True})
+
+        # ナレッジ検索ツール
+        if tool_name == "search_knowledge_base":
+            if self.knowledge_manager:
+                results = self.knowledge_manager.search_knowledge_base(
+                    tool_args.get("query", "")
+                )
+                return False, json.dumps(results, ensure_ascii=False)
+            return False, json.dumps({"error": "KnowledgeManager が未初期化です"})
+
+        if tool_name == "search_web":
+            if self.knowledge_manager:
+                results = self.knowledge_manager.search_web(tool_args.get("query", ""))
+                return False, json.dumps(results, ensure_ascii=False)
+            return False, json.dumps({"error": "KnowledgeManager が未初期化です"})
+
+        # マップ操作ツール
+        if self.map_ctrl:
+            result = execute_map_tool(self.map_ctrl, tool_name, tool_args)
+            return False, json.dumps(result, ensure_ascii=False, default=str)
+
+        return False, json.dumps({"error": f"未知のツール: {tool_name}"})
+
+    # ──────────────────────────────────────────
+    # エージェントループ
+    # ──────────────────────────────────────────
+
+    def _run_agent_loop(self, target_char: dict, target_id: str, enriched_body: str) -> None:
+        """ツール呼び出し対応のエージェントループ。
+
+        LLMがツールを要求 → Python で実行 → 結果をプロンプトに返す
+        → 最終的に post_chat / finish で完了、というフローを最大3回繰り返す。
+        """
         char_name = target_char["name"]
         prompt_tmpl = self.pm.get_template(target_char.get("prompt_id"))
 
@@ -335,12 +344,15 @@ class CCFoliaConnector:
             "あなたはGMです。画像とチャットを見て次に行うべきことを判断してください。\n"
             "1. まず `[思考]` と `[/思考]` のタグの中で、状況を分析してください。\n"
             "2. 分析が終わったら、必ず `post_chat` ツールを使ってプレイヤーに発言してください。\n"
-            "3. 発言が終わったら `finish` ツールで終了してください。\n\n"
+            "3. 発言が終わったら `finish` ツールで終了してください。\n"
+            "4. ルールや知識が必要なら `search_knowledge_base` や `search_web` で検索できます。\n\n"
             "【ステータス管理の絶対ルール】\n"
-            "敵やPCのHP・MPなどのステータスはあなたが頭の中で計算・管理してください。ダメージや回復など、ステータスに変動があった際は、発言の末尾に必ず「(現在HP: 敵A 5/10, 敵B 10/10)」のように明記してステータス管理を行ってください。"
+            "敵やPCのHP・MPなどのステータスはあなたが頭の中で計算・管理してください。"
+            "ダメージや回復など、ステータスに変動があった際は、発言の末尾に必ず"
+            "「(現在HP: 敵A 5/10, 敵B 10/10)」のように明記してステータス管理を行ってください。"
         )
 
-        messages = [
+        messages: list[dict] = [
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": enriched_body},
         ]
@@ -348,11 +360,15 @@ class CCFoliaConnector:
 
         try:
             for _step in range(3):
-                screenshot_b64 = None
-                try:
-                    screenshot_b64 = self.driver.get_screenshot_as_base64()
-                except Exception:
-                    pass
+                # スクリーンショット取得
+                screenshot_b64: str | None = None
+                if self.adapter:
+                    try:
+                        raw = self.adapter.take_screenshot()
+                        if raw:
+                            screenshot_b64 = base64.b64encode(raw).decode("ascii")
+                    except Exception:
+                        pass
 
                 content, tool_calls = self.lm_client.generate_with_tools(
                     messages,
@@ -378,7 +394,8 @@ class CCFoliaConnector:
                         print(f"   ✓ (自動投稿): {text[:40]}...")
                     else:
                         print(
-                            "   ⚠️ 有効なテキストがありませんでした。思考ループによる自爆と判断し終了します。"
+                            "   ⚠️ 有効なテキストがありませんでした。"
+                            "思考ループによる自爆と判断し終了します。"
                         )
                         self._post_system_message(
                             char_name,
@@ -403,26 +420,27 @@ class CCFoliaConnector:
                     )
                     print(f"   🛠️ ツール実行: {f_name}")
 
-                    if f_name == "finish":
+                    is_finished, result_json = self._execute_tool(
+                        f_name, f_args, char_name, tc.get("id", "")
+                    )
+
+                    if is_finished:
                         finished = True
-                    elif f_name == "post_chat":
-                        text = f_args.get("text", "")
-                        if text:
-                            tagged = self.AI_PREFIX + text
-                            ok = self._post_message(char_name, tagged)
-                            if ok:
-                                self._sent_bodies.add(tagged[:80])
-                                self.ctx.add_message(char_name, tagged, is_ai=True)
-                                print(f"      ✓ 発言: {text[:40]}...")
-                    elif self.map_ctrl:
-                        execute_map_tool(self.map_ctrl, f_name, f_args)
+                    elif result_json:
+                        # ツール結果をメッセージ履歴に追加（マルチステップ推論用）
+                        messages.append({
+                            "role": "tool",
+                            "content": result_json,
+                            "tool_call_id": tc.get("id", ""),
+                        })
 
                 if finished:
                     break
             else:
                 self._post_system_message(
                     char_name,
-                    "（システム: 思考ループが上限に達したため処理を中断しました。別のアプローチで指示してください）",
+                    "（システム: 思考ループが上限に達したため処理を中断しました。"
+                    "別のアプローチで指示してください）",
                 )
 
         except Exception as e:
@@ -430,6 +448,10 @@ class CCFoliaConnector:
             self._post_system_message(
                 char_name, "（システム: 予期せぬエラーが発生しました。GMの処理をスキップします）"
             )
+
+    # ──────────────────────────────────────────
+    # 世界観設定読み込み
+    # ──────────────────────────────────────────
 
     def _load_world_setting(self) -> str:
         ws_path = self.sm.configs_dir / "world_setting.json"
@@ -442,13 +464,16 @@ class CCFoliaConnector:
                 pass
         return ""
 
-    def _monitor_loop(self):
+    # ──────────────────────────────────────────
+    # 監視ループ
+    # ──────────────────────────────────────────
+
+    def _monitor_loop(self) -> None:
         print("👁️  チャット監視開始")
         time.sleep(2)
         self._known_messages = [f"{m['speaker']}|{m['body']}" for m in self._get_chat_messages()]
 
         while self._running:
-            self._close_alert()
             current = self._get_chat_messages()
             new_msgs = [
                 m for m in current if f"{m['speaker']}|{m['body']}" not in self._known_messages
@@ -466,18 +491,26 @@ class CCFoliaConnector:
                         k in body for k in self.detector.keyword_map.get("meta_gm", [])
                     ):
                         target_char = self.cm.get_character("meta_gm")
-                        enriched = f"{self.ctx.get_context_summary()}\n\n【今回反応すべき発言】\n[{speaker}]: {body}"
+                        enriched = (
+                            f"{self.ctx.get_context_summary()}\n\n"
+                            f"【今回反応すべき発言】\n[{speaker}]: {body}"
+                        )
 
                         if self.ctx.phase in ["combat", "mission"]:
                             self._run_agent_loop(target_char, "meta_gm", enriched)
                         else:
-                            # ★ 修正ポイント: プロンプトIDから「中身」を正しく取得し、世界観データと結合する
                             prompt_tmpl = self.pm.get_template(target_char.get("prompt_id"))
-                            sys_prompt = f"{self.world_setting}\n\n{prompt_tmpl.get('system', '') if prompt_tmpl else ''}\n※重要: 内部の思考プロセス（Thinking Process）は極力短く済ませ、プレイヤーへの返答テキストを直ちに出力してください。"
+                            sys_prompt = (
+                                f"{self.world_setting}\n\n"
+                                f"{prompt_tmpl.get('system', '') if prompt_tmpl else ''}\n"
+                                "※重要: 内部の思考プロセス（Thinking Process）は極力短く済ませ、"
+                                "プレイヤーへの返答テキストを直ちに出力してください。"
+                            )
 
-                            # ★ 修正ポイント: max_tokensを増やして息切れ（lengthエラー）を防止
                             res, _ = self.lm_client.generate_response(
-                                system_prompt=sys_prompt, user_message=enriched, max_tokens=4096
+                                system_prompt=sys_prompt,
+                                user_message=enriched,
+                                max_tokens=4096,
                             )
 
                             if res:
@@ -488,8 +521,8 @@ class CCFoliaConnector:
             self._known_messages = self._known_messages[-300:]
             time.sleep(self.poll_interval)
 
-    # ★ 追加: ランチャーからの「送信命令」を受け取るための監視ループ
-    def _stdin_monitor_loop(self):
+    def _stdin_monitor_loop(self) -> None:
+        """ランチャーからの送信命令を受け取る監視ループ。"""
         for line in sys.stdin:
             line = line.strip()
             if not line:
@@ -509,13 +542,17 @@ class CCFoliaConnector:
             except Exception as e:
                 print(f"❌ 標準入力の処理エラー: {e}")
 
-    def start(self):
+    # ──────────────────────────────────────────
+    # メインエントリーポイント
+    # ──────────────────────────────────────────
+
+    def start(self) -> None:
         print("=" * 50 + "\nタクティカル祓魔師 CCFolia連携\n" + "=" * 50)
         self.sm.start_new_session("CCFoliaSession")
-        self._init_driver()
+        self._init_adapter()
+        self._init_knowledge()
         self._running = True
 
-        # セッション監視と標準入力監視を同時に実行
         threading.Thread(target=self._monitor_loop, daemon=True).start()
         threading.Thread(target=self._stdin_monitor_loop, daemon=True).start()
 
@@ -525,7 +562,7 @@ class CCFoliaConnector:
         except KeyboardInterrupt:
             self._running = False
             print("終了します")
-            self._close_driver()
+            self._close_adapter()
 
 
 if __name__ == "__main__":

@@ -14,8 +14,12 @@ TacticalAI/
 │   ├── lm_client.py             # LMClient（LM Studio API ラッパー）
 │   ├── session_manager.py       # SessionManager（ログ・バックアップ管理）
 │   ├── character_manager.py     # CharacterManager（キャラクター管理）
-│   ├── ccfolia_map_controller.py # CCFoliaMapController（Selenium 駒操作）
-│   ├── ccfolia_connector.py     # ここフォリア WebDriver 接続
+│   ├── knowledge_manager.py     # KnowledgeManager（RAG + Web検索）
+│   ├── ccfolia_map_controller.py # CCFoliaMapController（VTTアダプター委譲ラッパー）
+│   ├── ccfolia_connector.py     # CCFolia連携（エージェントループ + チャット監視）
+│   ├── vtt_adapters/
+│   │   ├── base_adapter.py      # BaseVTTAdapter（VTT操作の抽象インターフェース）
+│   │   └── ccfolia_adapter.py   # CCFoliaAdapter（Playwright sync_api 実装）
 │   ├── char_maker.py            # キャラクター作成ユーティリティ
 │   ├── gui_tool.py              # tkinter GUI 補助ツール
 │   └── launcher.py              # メインランチャー（tkinter GUI）
@@ -26,6 +30,8 @@ TacticalAI/
 │   ├── world_setting.json       # 世界観設定
 │   ├── board_state.json         # ボード状態キャッシュ
 │   └── map_commands.json        # マップコマンド定義
+├── data/
+│   └── chroma_db/               # ChromaDB ベクトルDB（.gitignore対象）
 ├── sessions/                    # セッションログ保存先（自動生成）
 ├── tests/                       # pytest テストスイート
 ├── pyproject.toml               # ツール設定（pytest / ruff / mypy）
@@ -38,7 +44,8 @@ TacticalAI/
 
 ### `LMClient` (core/lm_client.py)
 - LM Studio の OpenAI 互換 API（`http://localhost:1234`）に POST
-- `generate_response()` が中心メソッド。返答を `_clean_response()` で JSON 抽出
+- `generate_response()` が基本メソッド。返答を `_clean_response()` で JSON 抽出
+- `generate_with_tools()` がツール呼び出し対応のマルチターン推論メソッド（画像入力対応）
 - `no_think=True` で Qwen3 系の思考トークンを抑制
 - テスト時は `requests.post` / `requests.get` をモックすること
 
@@ -57,9 +64,22 @@ TacticalAI/
 - `get_enabled_characters()` で `enabled: true` のキャラのみ返す
 
 ### `CCFoliaMapController` (core/ccfolia_map_controller.py)
-- Selenium WebDriver で ここフォリア の .movable 要素を操作
-- `get_board_state()` → `move_piece(img_hash, grid_x, grid_y)`
-- テスト時は `MagicMock` で `driver` を差し替えること
+- VTTアダプター（`BaseVTTAdapter`）に駒操作を委譲するラッパー
+- `get_board_state()` → `move_piece(img_hash, grid_x, grid_y)` → `spawn_piece(character_json)`
+- テスト時は `MagicMock` で `adapter` を差し替えること
+
+### `BaseVTTAdapter` / `CCFoliaAdapter` (core/vtt_adapters/)
+- `BaseVTTAdapter`: VTT操作の抽象インターフェース（同期API）
+- `CCFoliaAdapter`: Playwright sync_api による CCFolia 操作実装
+- JSベースのドラッグ操作、クリップボードペーストによる駒配置
+- テスト時は `MagicMock` で Playwright の `page` を差し替えること
+
+### `KnowledgeManager` (core/knowledge_manager.py)
+- ChromaDB によるベクトル検索（ルールブック、セッションログ等）
+- DuckDuckGo Search によるウェブ検索
+- `search_knowledge_base(query)` / `search_web(query)` が主要メソッド
+- `ingest_world_setting()` / `ingest_session_log()` でデータ取り込み
+- テスト時は `tmp_path` で一時 ChromaDB を使うこと
 
 ## 開発コマンド
 

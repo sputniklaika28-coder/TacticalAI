@@ -42,6 +42,9 @@ sessions/
 # 実際の enemy_pieces.json は除外（.example のみ管理）
 configs/enemy_pieces.json
 
+# ChromaDB ベクトルDB（ローカルのみ）
+data/chroma_db/
+
 # LM Studio / Chromedriver などローカルバイナリ
 chromedriver*
 geckodriver*
