@@ -82,15 +82,37 @@ def mock_lm_client():
 
 
 # ──────────────────────────────────────────
-# Selenium WebDriver モック
+# VTTアダプター モック
 # ──────────────────────────────────────────
 
 
 @pytest.fixture
+def mock_adapter():
+    """BaseVTTAdapter を模倣する MagicMock"""
+    adapter = MagicMock()
+    adapter.get_board_state.return_value = [
+        {
+            "index": 0,
+            "img_hash": "abcdef12",
+            "img_url": "https://example.com/files/abcdef12/img.png",
+            "px_x": 96,
+            "px_y": 192,
+            "grid_x": 1,
+            "grid_y": 2,
+        }
+    ]
+    adapter.move_piece.return_value = True
+    adapter.spawn_piece.return_value = True
+    adapter.send_chat.return_value = True
+    adapter.get_chat_messages.return_value = []
+    adapter.take_screenshot.return_value = b"\x89PNG"
+    return adapter
+
+
+@pytest.fixture
 def mock_driver():
-    """Selenium WebDriver を模倣する MagicMock"""
+    """Selenium WebDriver を模倣する MagicMock（レガシー互換用）"""
     driver = MagicMock()
-    # デフォルトの execute_script 戻り値（ボード状態）
     driver.execute_script.return_value = [
         {
             "index": 0,

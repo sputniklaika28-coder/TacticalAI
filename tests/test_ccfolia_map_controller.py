@@ -1,132 +1,185 @@
 """
-test_ccfolia_map_controller.py — CCFoliaMapController のユニットテスト
+test_ccfolia_map_controller.py — CCFoliaMapController のユニットテスト（リファクタ版）
 
-Selenium WebDriver は MagicMock で差し替える。
-DOM 操作・pyautogui は呼ばれないのでテスト環境でも安全。
+pyautogui を排除しアダプターに委譲する新設計のテスト。
 
 テスト対象:
-  - get_board_state()
-  - move_piece()
-  - _parse_xy()
-  - _hash()
+  - parse_xy() / extract_hash() ユーティリティ
+  - get_board_state() / move_piece() のアダプター委譲
+  - execute_map_tool() ディスパッチャー
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from core.ccfolia_map_controller import GRID_SIZE, CCFoliaMapController
+from core.ccfolia_map_controller import CCFoliaMapController, execute_map_tool
 
 
 @pytest.fixture
-def controller(mock_driver) -> CCFoliaMapController:
-    return CCFoliaMapController(driver=mock_driver)
+def mock_adapter():
+    """BaseVTTAdapter を模倣する MagicMock"""
+    adapter = MagicMock()
+    adapter.get_board_state.return_value = [
+        {
+            "index": 0,
+            "img_hash": "abcdef12",
+            "img_url": "https://ccfolia.com/files/abcdef1234567890/img.png",
+            "px_x": 96,
+            "px_y": 192,
+            "grid_x": 1,
+            "grid_y": 2,
+        }
+    ]
+    adapter.move_piece.return_value = True
+    adapter.spawn_piece.return_value = True
+    return adapter
+
+
+@pytest.fixture
+def controller(mock_adapter) -> CCFoliaMapController:
+    return CCFoliaMapController(adapter=mock_adapter)
+
+
+@pytest.fixture
+def controller_no_adapter() -> CCFoliaMapController:
+    return CCFoliaMapController(adapter=None)
 
 
 # ──────────────────────────────────────────
-# _parse_xy
+# parse_xy
 # ──────────────────────────────────────────
 
 
 class TestParseXY:
-    def test_normal_translate(self, controller):
-        assert controller._parse_xy("translate(96px, 192px)") == (96, 192)
+    def test_normal_translate(self):
+        assert CCFoliaMapController.parse_xy("translate(96px, 192px)") == (96, 192)
 
-    def test_negative_values(self, controller):
-        assert controller._parse_xy("translate(-48px, -96px)") == (-48, -96)
+    def test_negative_values(self):
+        assert CCFoliaMapController.parse_xy("translate(-48px, -96px)") == (-48, -96)
 
-    def test_float_values_truncated(self, controller):
-        x, y = controller._parse_xy("translate(96.5px, 192.8px)")
+    def test_float_values_truncated(self):
+        x, y = CCFoliaMapController.parse_xy("translate(96.5px, 192.8px)")
         assert x == 96
         assert y == 192
 
-    def test_invalid_returns_zero(self, controller):
-        assert controller._parse_xy("no-transform") == (0, 0)
+    def test_invalid_returns_zero(self):
+        assert CCFoliaMapController.parse_xy("no-transform") == (0, 0)
 
-    def test_none_returns_zero(self, controller):
-        assert controller._parse_xy(None) == (0, 0)
+    def test_none_returns_zero(self):
+        assert CCFoliaMapController.parse_xy(None) == (0, 0)
 
 
 # ──────────────────────────────────────────
-# _hash
+# extract_hash
 # ──────────────────────────────────────────
 
 
-class TestHash:
-    def test_extracts_8_chars_from_shared(self, controller):
+class TestExtractHash:
+    def test_extracts_8_chars_from_shared(self):
         url = "https://ccfolia.com/shared/abcdef1234567890/img.png"
-        assert controller._hash(url) == "abcdef12"
+        assert CCFoliaMapController.extract_hash(url) == "abcdef12"
 
-    def test_extracts_from_files_path(self, controller):
+    def test_extracts_from_files_path(self):
         url = "https://ccfolia.com/files/deadbeef99999999/piece.png"
-        assert controller._hash(url) == "deadbeef"
+        assert CCFoliaMapController.extract_hash(url) == "deadbeef"
 
-    def test_returns_empty_on_no_match(self, controller):
-        assert controller._hash("https://example.com/img.png") == ""
+    def test_returns_empty_on_no_match(self):
+        assert CCFoliaMapController.extract_hash("https://example.com/img.png") == ""
 
-    def test_none_url_returns_empty(self, controller):
-        assert controller._hash(None) == ""
+    def test_none_url_returns_empty(self):
+        assert CCFoliaMapController.extract_hash(None) == ""
 
 
 # ──────────────────────────────────────────
-# get_board_state
+# get_board_state (アダプター委譲)
 # ──────────────────────────────────────────
 
 
 class TestGetBoardState:
-    def test_returns_list(self, controller):
+    def test_delegates_to_adapter(self, controller, mock_adapter):
         state = controller.get_board_state()
+        mock_adapter.get_board_state.assert_called_once()
         assert isinstance(state, list)
+        assert len(state) > 0
 
     def test_piece_has_required_keys(self, controller):
         state = controller.get_board_state()
-        assert len(state) > 0
         piece = state[0]
-        for key in ("index", "img_hash", "img_url", "px_x", "px_y", "grid_x", "grid_y", "vx", "vy"):
+        for key in ("index", "img_hash", "img_url", "px_x", "px_y", "grid_x", "grid_y"):
             assert key in piece, f"キー '{key}' が欠けています"
 
-    def test_grid_calculated_from_px(self, controller):
-        """px / GRID_SIZE が grid 座標になっているか"""
-        state = controller.get_board_state()
-        piece = state[0]
-        assert piece["grid_x"] == round(piece["px_x"] / GRID_SIZE)
-        assert piece["grid_y"] == round(piece["px_y"] / GRID_SIZE)
-
-    def test_img_hash_extracted(self, controller):
-        state = controller.get_board_state()
-        piece = state[0]
-        assert piece["img_hash"] == "abcdef12"
-
-    def test_empty_board(self, mock_driver):
-        mock_driver.execute_script.return_value = []
-        ctrl = CCFoliaMapController(driver=mock_driver)
-        assert ctrl.get_board_state() == []
+    def test_returns_empty_without_adapter(self, controller_no_adapter):
+        assert controller_no_adapter.get_board_state() == []
 
 
 # ──────────────────────────────────────────
-# move_piece
+# move_piece (アダプター委譲)
 # ──────────────────────────────────────────
 
 
 class TestMovePiece:
-    def test_returns_false_when_piece_not_found(self, controller, capsys):
-        result = controller.move_piece("nonexistent", 3, 4)
-        assert result is False
-        captured = capsys.readouterr()
-        assert "見つかりません" in captured.out
-
-    def test_calls_drag_when_piece_found(self, controller):
-        """img_hash が一致する駒がある場合、_drag が呼ばれること"""
-        with patch.object(controller, "_drag", return_value=True) as mock_drag:
-            result = controller.move_piece("abcdef12", 2, 3)
-        mock_drag.assert_called_once()
+    def test_delegates_to_adapter(self, controller, mock_adapter):
+        result = controller.move_piece("abcdef12", 5, 7)
+        mock_adapter.move_piece.assert_called_once_with("abcdef12", 5, 7)
         assert result is True
 
-    def test_target_grid_passed_to_drag(self, controller):
-        """move_piece に渡した grid 座標が _drag の pixel 座標に変換されること"""
-        with patch.object(controller, "_drag", return_value=True) as mock_drag:
-            controller.move_piece("abcdef12", 5, 7)
-        # _drag(pieces, target_piece, dest_px_x, dest_px_y) の引数を確認
-        args = mock_drag.call_args[0]
-        assert args[2] == 5 * GRID_SIZE  # dest_px_x
-        assert args[3] == 7 * GRID_SIZE  # dest_px_y
+    def test_returns_false_without_adapter(self, controller_no_adapter):
+        assert controller_no_adapter.move_piece("abcdef12", 3, 4) is False
+
+
+# ──────────────────────────────────────────
+# move_piece_by_current_pos
+# ──────────────────────────────────────────
+
+
+class TestMovePieceByCurrentPos:
+    def test_finds_piece_and_delegates(self, controller, mock_adapter):
+        result = controller.move_piece_by_current_pos(1, 2, 5, 7)
+        mock_adapter.move_piece.assert_called_once_with("abcdef12", 5, 7)
+        assert result is True
+
+    def test_returns_false_when_no_piece_at_pos(self, controller, mock_adapter):
+        result = controller.move_piece_by_current_pos(99, 99, 5, 7)
+        mock_adapter.move_piece.assert_not_called()
+        assert result is False
+
+
+# ──────────────────────────────────────────
+# spawn_piece
+# ──────────────────────────────────────────
+
+
+class TestSpawnPiece:
+    def test_delegates_to_adapter(self, controller, mock_adapter):
+        char_data = {"name": "テスト", "hp": 10}
+        result = controller.spawn_piece(char_data)
+        mock_adapter.spawn_piece.assert_called_once_with(char_data)
+        assert result is True
+
+    def test_returns_false_without_adapter(self, controller_no_adapter):
+        assert controller_no_adapter.spawn_piece({"name": "テスト"}) is False
+
+
+# ──────────────────────────────────────────
+# execute_map_tool ディスパッチャー
+# ──────────────────────────────────────────
+
+
+class TestExecuteMapTool:
+    def test_dispatches_get_board_state(self, controller, mock_adapter):
+        execute_map_tool(controller, "get_board_state", {})
+        mock_adapter.get_board_state.assert_called_once()
+
+    def test_dispatches_move_piece(self, controller, mock_adapter):
+        execute_map_tool(controller, "move_piece", {"img_hash": "abc", "grid_x": 1, "grid_y": 2})
+        mock_adapter.move_piece.assert_called_once_with("abc", 1, 2)
+
+    def test_dispatches_spawn_piece(self, controller, mock_adapter):
+        data = {"name": "test"}
+        execute_map_tool(controller, "spawn_piece", {"character_json": data})
+        mock_adapter.spawn_piece.assert_called_once_with(data)
+
+    def test_unknown_tool_returns_error(self, controller):
+        result = execute_map_tool(controller, "unknown_tool", {})
+        assert "error" in result
