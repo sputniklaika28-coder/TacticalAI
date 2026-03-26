@@ -163,7 +163,7 @@ class TestSearchKnowledgeBase:
 
 
 class TestSearchWeb:
-    @patch("duckduckgo_search.DDGS")
+    @patch("core.knowledge_manager.DDGS")
     def test_returns_formatted_results(self, mock_ddgs_cls, km):
         mock_ddgs = MagicMock()
         mock_ddgs.__enter__ = MagicMock(return_value=mock_ddgs)
@@ -180,7 +180,7 @@ class TestSearchWeb:
         assert results[0]["url"] == "https://example.com/trpg"
         assert results[0]["snippet"] == "TRPGの基本"
 
-    @patch("duckduckgo_search.DDGS")
+    @patch("core.knowledge_manager.DDGS")
     def test_respects_max_results(self, mock_ddgs_cls, km):
         mock_ddgs = MagicMock()
         mock_ddgs.__enter__ = MagicMock(return_value=mock_ddgs)
@@ -192,7 +192,7 @@ class TestSearchWeb:
         mock_ddgs.text.assert_called_once_with("test", max_results=1)
         assert len(results) == 1
 
-    @patch("duckduckgo_search.DDGS")
+    @patch("core.knowledge_manager.DDGS")
     def test_handles_error(self, mock_ddgs_cls, km):
         mock_ddgs_cls.side_effect = Exception("network error")
         results = km.search_web("test")
