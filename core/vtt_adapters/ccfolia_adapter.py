@@ -16,7 +16,7 @@ from pathlib import Path
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
-from core.vtt_adapters.base_adapter import BaseVTTAdapter
+from .base_adapter import BaseVTTAdapter
 
 logger = logging.getLogger(__name__)
 
